@@ -1,0 +1,16 @@
+[package]
+name = "geko-module-tiles"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# The tiles module as a process module (`ProcessModule`); the host links the library in.
+[[bin]]
+name = "geko-tiles"
+path = "src/main.rs"
+
+[dependencies]
+geko-module-sdk.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
