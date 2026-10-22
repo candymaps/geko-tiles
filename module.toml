@@ -1,7 +1,5 @@
-# The package of the tiles module (docs/MODULES_PLAN.md): `make modules` puts it, with the
-# executable and the library, in a directory of GEKO_MODULES, and ci/modules.sh publishes it, with
-# its version, contract and platform. `kind = "dylib"`, with `entry = "libgeko_tiles.so"`, loads it
-# into the process of geko instead.
+# The package of the tiles module (docs/MODULES_PLAN.md): the library that geko loads into its
+# process (`DylibModule`, the only adapter), from the crate in dylib/.
 name = "tiles"
-kind = "process"
-entry = "geko-tiles"
+kind = "dylib"
+entry = "libgeko_tiles.so"

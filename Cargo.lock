@@ -97,7 +97,6 @@ dependencies = [
  "geko-module-sdk",
  "tempfile",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
