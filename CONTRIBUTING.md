@@ -1,10 +1,8 @@
 # Contribuir a geko
 
-## Licencia y CLA
+## Licencia
 
-geko se publica con la licencia [AGPL-3.0](LICENSE). Para aceptar una contribución hace falta firmar antes el [acuerdo de licencia de contribuidor](CLA.md) (CLA), basado en el Harmony Individual CLA: conservas la autoría de tu código y das al proyecto una licencia sobre él, que le permite publicarlo también con otras licencias.
-
-La firma es automática: en tu primer pull request, el bot del CLA comenta con una frase; respóndela en un comentario del PR y queda registrada. Hasta entonces el PR no se puede fusionar. Si contribuyes en nombre de tu empresa, o parte del código no es tuyo, dilo en el PR antes de firmar.
+geko se publica con la licencia [AGPL-3.0](LICENSE), y cada contribución se acepta con esa misma licencia, sin firmar nada aparte: conservas la autoría de tu código. Solo los colaboradores del repositorio pueden abrir pull requests; si quieres contribuir, pide que te inviten. Si contribuyes en nombre de tu empresa, o parte del código no es tuyo, dilo en el PR.
 
 ## Ramas
 
