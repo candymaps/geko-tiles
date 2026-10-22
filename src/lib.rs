@@ -20,7 +20,6 @@ impl Module for TilesModule {
             version: geko_module_sdk::module_version!().to_owned(),
             contract: module::CONTRACT,
             routes: vec![route("{z}/{x}/{y}"), route("tilejson.json")],
-            home: None,
             openapi: None,
             attribution: None,
             commands: vec![],
