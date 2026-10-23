@@ -80,7 +80,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 [[package]]
 name = "geko-module-sdk"
 version = "0.1.0"
-source = "git+https://github.com/candymaps/geko?rev=03b41187113b75055a2965de6d0dd08ab4164607#03b41187113b75055a2965de6d0dd08ab4164607"
+source = "git+https://github.com/candymaps/geko.git?rev=03b41187113b75055a2965de6d0dd08ab4164607#03b41187113b75055a2965de6d0dd08ab4164607"
 dependencies = [
  "hex",
  "serde",
