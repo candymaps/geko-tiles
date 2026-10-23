@@ -66,7 +66,7 @@ jobs:
           module=1
           before="${{ github.event.before }}"
           if [ "$release" = 0 ] && git cat-file -e "$before^{commit}" 2> /dev/null \
-            && git diff --quiet "$before" HEAD -- src dylib module.toml Cargo.toml Cargo.lock rust-toolchain.toml; then
+            && git diff --quiet "$before" HEAD -- module Cargo.toml Cargo.lock rust-toolchain.toml; then
             module=0
           fi
           {

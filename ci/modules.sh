@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The module of this repository as the package geko downloads: its library (the crate
+# The module of this repository as the package geko downloads: module/, with its library (the crate
 # geko-module-tiles-dylib) compiled in release, and module.toml completed (version, contract,
 # platform) and signed.
 #
@@ -59,9 +59,9 @@ build() {
     # As geko names it (std::env::consts::OS and ARCH), which uname gives on Linux.
     platform="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
     version=$(version)
-    name=$(field name module.toml)
-    kind=$(field kind module.toml)
-    entry=$(field entry module.toml)
+    name=$(field name module/module.toml)
+    kind=$(field kind module/module.toml)
+    entry=$(field entry module/module.toml)
     GEKO_MODULE_VERSION=$version cargo build --release --locked -p "geko-module-$name-dylib"
     rm -rf "${out:?}/$name"
     mkdir -p "$out/$name"
