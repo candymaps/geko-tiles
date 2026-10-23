@@ -9,7 +9,7 @@ publish = false
 license = "AGPL-3.0-only"
 
 [workspace.dependencies]
-# The contract, from the repository of the host (docs/MODULES_PLAN.md there): the commit of its tag
+# The contract, from the repository of the host (docs/MODULES.md there): the commit of its tag
 # sdk-<contract>.
 geko-module-sdk = { git = "https://github.com/candymaps/geko.git", rev = "03b41187113b75055a2965de6d0dd08ab4164607" }
 geko-module-tiles = { path = "module" }

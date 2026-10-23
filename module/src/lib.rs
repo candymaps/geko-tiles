@@ -1,4 +1,4 @@
-//! The tiles module (PROJECT.md §11), still a skeleton: it declares its routes, under `/tiles/`,
+//! The tiles module (docs/MODULE_PLAN.md), still a skeleton: it declares its routes, under `/tiles/`,
 //! and answers 503 until it builds a part of the bundle.
 
 use geko_module_sdk::Result;
