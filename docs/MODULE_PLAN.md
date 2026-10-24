@@ -78,7 +78,7 @@ Cerrados con Baleares («Medidas»): la compresión (el gzip de Planetiler; brot
 ## Pasos
 
 1. **Prueba con medidas** (Baleares congelada del golden del geocoder; hecha. España, aplazada: «Por decidir», 5): el perfil de Protomaps con Planetiler en Docker. Tiempo y RAM del build; tamaño con MVT y MLT, con gzip, zopfli y brotli, y con zoom máximo 13 y 14; cuántas teselas se repiten; si dos ejecuciones dan los mismos bytes. Cierra los puntos de «Por decidir». Los resultados van a «Medidas», abajo.
-2. **Puesta al día del repositorio:** la SDK en la etiqueta `sdk-1`, README y AGENTS.md como los del geocoder, el secreto `GEKO_PACK_SIGNING_KEY` y la decisión de licencias por escrito (abajo).
+2. **Puesta al día del repositorio** (hecho, 2026-10-24): la SDK en la etiqueta `sdk-1`, README y AGENTS.md como los del geocoder, el secreto `GEKO_PACK_SIGNING_KEY` (firma el módulo al publicarlo) y la decisión de licencias por escrito (abajo).
 3. **Perfil y runtime:** el perfil de Protomaps con nuestros parches (Natural Earth por capas, «Entradas globales»), compilado en la CI y metido en el paquete del módulo; la descarga de `planetiler.jar` y del JRE de Temurin, con sus sha256, por el `Downloader`.
 4. **Build:** `plan`, `fetch`, `prepare` y `build`, con las etapas de recorte de las entradas globales, fusión de los extractos, Planetiler y conversión al formato del bundle, cada una con su sello (la clave lleva las versiones de Planetiler y del perfil, y sus opciones). La atribución ODbL en el manifiesto.
 5. **Servicio:** el índice, las rutas, `tilejson.json` con las URL versionadas y las métricas (`geko_tiles_*`). Latencia (p50 y p99) y caudal con 16 a la vez, anotados en «Optimizations».
