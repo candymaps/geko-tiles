@@ -67,6 +67,10 @@ build() {
     rm -rf "${out:?}/$name"
     mkdir -p "$out/$name"
     cp "$target/release/$entry" "$out/$name/$entry"
+    # The Planetiler profile, built before by ci/profile.sh (it needs Docker, and this runs in a container).
+    [ -f "$target/profile/out/protomaps-basemap.jar" ] \
+        || { echo "no profile: run ci/profile.sh $target/profile/out first" >&2; return 1; }
+    cp "$target/profile/out/protomaps-basemap.jar" "$out/$name/"
     printf 'kind = "%s"\nentry = "%s"\nname = "%s"\nversion = "%s"\ncontract = %s\nplatform = "%s"\n' \
         "$kind" "$entry" "$name" "$version" "$contract" "$platform" > "$out/$name/module.toml"
     echo "built $name $version (contract $contract, $platform) in $out/$name"

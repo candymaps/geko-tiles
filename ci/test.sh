@@ -9,6 +9,8 @@
 #                 only through the contract of the SDK), and licenses and security advisories
 #                 (cargo-deny)
 #   contracts     unit tests and the conformance suite of the module contract
+#   profile       the Planetiler profile: planetiler/patches/ apply to the Protomaps commit of
+#                 planetiler/profile.toml and it compiles (ci/profile.sh, in Docker)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -58,7 +60,7 @@ deny() {
     "$bin" --locked check
 }
 
-ALL_VARIANTS=code,contracts
+ALL_VARIANTS=code,contracts,profile
 VARIANTS=$ALL_VARIANTS
 
 usage() { echo "usage: $0 [--variant $ALL_VARIANTS]" >&2; }
@@ -101,6 +103,7 @@ if wants code; then
     run deny deny
 fi
 wants contracts && run test test
+wants profile && run profile ci/profile.sh "${CARGO_TARGET_DIR:-target}/profile/out"
 if [ ${#FAILED[@]} -gt 0 ]; then
     echo "failed: ${FAILED[*]}" >&2
     exit 1

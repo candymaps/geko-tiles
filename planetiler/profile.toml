@@ -1,0 +1,28 @@
+# What generates the tiles (docs/MODULE_PLAN.md, «Generador»). Only the profile goes into the package
+# of the module; Planetiler and the Java runtime are downloaded from their origin by each
+# installation, with the Downloader of geko, and checked against these checksums.
+
+# The Protomaps Basemap profile at a fixed commit, with planetiler/patches/ applied (ci/profile.sh).
+[profile]
+repository = "https://github.com/protomaps/basemaps"
+commit     = "42ffaaa4a85a41bfcb23e43cc0f5b492a5eca123"
+
+# The official planetiler.jar of the release the profile is compiled against (its pom.xml), with all
+# its dependencies.
+[planetiler]
+version = "0.10.2"
+url     = "https://github.com/onthegomap/planetiler/releases/download/v0.10.2/planetiler.jar"
+sha256  = "f310bd0413e2e4512b27f4046d418664e8e1d3bf31603c2a70e23de06c167e4d"
+
+# The Temurin JRE (Adoptium) that Planetiler 0.10.2 asks for, Java 21, per platform as geko names
+# it (std::env::consts::OS and ARCH).
+[jre]
+release = "jdk-21.0.13+9"
+
+[jre.linux-x86_64]
+url    = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jre_x64_linux_hotspot_21.0.13_9.tar.gz"
+sha256 = "a535a1df9c6284d9618872984e026ae0352d1f7e9e0605425c0e6114f47351dd"
+
+[jre.linux-aarch64]
+url    = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jre_aarch64_linux_hotspot_21.0.13_9.tar.gz"
+sha256 = "b1734db7ade49c3f6acc6ae06233b8c2dd90e3e2f00f67000ae1c972aaa64d8c"

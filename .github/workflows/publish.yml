@@ -66,7 +66,7 @@ jobs:
           module=1
           before="${{ github.event.before }}"
           if [ "$release" = 0 ] && git cat-file -e "$before^{commit}" 2> /dev/null \
-            && git diff --quiet "$before" HEAD -- module Cargo.toml Cargo.lock rust-toolchain.toml; then
+            && git diff --quiet "$before" HEAD -- module planetiler Cargo.toml Cargo.lock rust-toolchain.toml; then
             module=0
           fi
           {
@@ -85,6 +85,9 @@ jobs:
       # The module, compiled on the Debian of the image of geko, whose glibc is older than that of
       # the runner: a module built here would not start there. Its dependencies are fetched here,
       # where the token reads the host, and the container builds offline with them.
+      # The Planetiler profile, which goes into the package (ci/profile.sh, in Docker).
+      - if: steps.version.outputs.module == '1'
+        run: CARGO_TARGET_DIR=target ci/profile.sh target/profile/out
       - if: steps.version.outputs.module == '1'
         env:
           GEKO_RELEASE: ${{ steps.version.outputs.release }}
