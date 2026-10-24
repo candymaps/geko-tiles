@@ -12,13 +12,13 @@
 
 # geko-tiles
 
-The vector tiles module of [geko](https://github.com/candymaps/geko). **Status: it builds and serves the tiles; styles, fonts and sprites are missing.** It meets the contract of the host and passes its conformance suite; it downloads what the scope needs, generates the tiles with Planetiler, leaves its part of the bundle (all of Spain in 14 minutes) and serves it, but no version has been published. The machine that builds needs `libfontconfig1` (the Java runtime reads the fonts of the profile with it). The plan, with its decisions and measurements, is in [docs/MODULE_PLAN.md](docs/MODULE_PLAN.md) (in Spanish).
+The vector tiles module of [geko](https://github.com/candymaps/geko). **Status: it builds and serves the tiles, with styles, fonts and sprites.** It meets the contract of the host and passes its conformance suite; it downloads what the scope needs, generates the tiles with Planetiler, leaves its part of the bundle (all of Spain in 14 minutes) and serves it, but no version has been published. The machine that builds needs `libfontconfig1` (the Java runtime reads the fonts of the profile with it). The plan, with its decisions and measurements, is in [docs/MODULE_PLAN.md](docs/MODULE_PLAN.md) (in Spanish).
 
 What it serves, under `/tiles/`:
 
 - **Vector tiles** (`/tiles/{z}/{x}/{y}`), MVT by default and MLT as an option, up to zoom 14, with the [Protomaps Basemap](https://github.com/protomaps/basemaps) schema. A tile that does not exist answers 204, which clients take as empty.
 - **A TileJSON** (`/tiles/tilejson.json`) with the attribution, the layers, the bounds of the scope and versioned tile URLs (`?v=<bundle>`): those tiles are cached forever by clients and CDNs, and a new bundle changes the URLs.
-- **Styles, fonts and sprites** (not yet), as static data: any style can paint the tiles, and the server never knows which one.
+- **Styles** (`/tiles/styles/{flavor}/{lang}.json`, listed at `/tiles/styles.json`): those of Protomaps, in 5 flavors (`light`, `dark`, `white`, `grayscale`, `black`) and 41 languages, with their **fonts** (`/tiles/fonts/…`) and **sprites** (`/tiles/sprites/…`). They are data: any other MapLibre style can paint the tiles, pointing to `tilejson.json`, and the server never knows which one.
 
 On top of the same foundation as the rest of geko:
 
@@ -41,7 +41,9 @@ Its own options go in `geko-tiles.toml`, beside `geko.toml`; every one is option
 
 ```toml
 format = "mvt"        # or "mlt": about 10 % smaller, read only by MapLibre GL JS 5.12 and later
-url = "/tiles"        # where clients fetch the tiles, as tilejson.json writes it: an absolute URL behind a CDN or a proxy with a prefix
+url = "/tiles"        # where clients fetch the tiles, fonts and sprites, as tilejson.json and the styles write it: absolute
+                      # (https://maps.example.com/tiles) for clients that load a style by its URL (MapLibre needs the sprite
+                      # absolute), behind a CDN or behind a proxy with a prefix
 
 [osm]
 mirror = "auto"       # Geofabrik, or the URL of a mirror with its layout (the extracts are shared with the geocoder)
@@ -53,7 +55,7 @@ storage = "mmap"      # or "ram": where Planetiler keeps its temporary data
 qrank = true          # download QRank to order places and POIs; the build goes on without it
 ```
 
-Downloading requires `[data] accept_licenses = true` in `geko.toml`, as for every module. Planetiler's memory, threads and storage change how fast the build runs and how much memory it takes, never the tiles.
+Downloading requires `[data] accept_licenses = true` in `geko.toml`, as for every module. Besides OSM and the inputs of Planetiler, it downloads the fonts (Noto Sans, OFL) and sprites (icons of Tangram, MIT) of the styles, from [protomaps/basemaps-assets](https://github.com/protomaps/basemaps-assets) at a fixed commit. Planetiler's memory, threads and storage change how fast the build runs and how much memory it takes, never the tiles.
 
 ## License
 
@@ -70,4 +72,4 @@ Read the full terms in [LICENSE](LICENSE).
 | **Rust** (2024 edition) | The module: its build stages and the service of the tiles |
 | `geko-module-sdk` | The contract with the host, at the tag `sdk-<contract>` of [geko](https://github.com/candymaps/geko) |
 | [Planetiler](https://github.com/onthegomap/planetiler) (Java) | Generating the tiles, as a subprocess of the build |
-| [Protomaps Basemap](https://github.com/protomaps/basemaps) | The Planetiler profile: what goes into each layer of the tiles |
+| [Protomaps Basemap](https://github.com/protomaps/basemaps) | The Planetiler profile (what goes into each layer of the tiles) and the styles that paint them |

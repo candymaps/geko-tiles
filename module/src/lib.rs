@@ -1,7 +1,9 @@
 //! The tiles module (docs/MODULE_PLAN.md): it downloads the OSM extracts of the scope and the
 //! global inputs of the Protomaps profile, runs Planetiler once and converts its tiles into its part
-//! of the bundle. It serves them under `/tiles/` (`serve`).
+//! of the bundle, with the fonts and sprites of the styles. It serves them under `/tiles/`, with the
+//! styles of Protomaps (`serve`, `styles`).
 
+mod assets;
 mod config;
 mod extracts;
 mod geo;
@@ -12,6 +14,7 @@ mod planetiler;
 mod pmtiles;
 mod serve;
 mod shapefile;
+mod styles;
 mod tileset;
 
 use std::time::Duration;
@@ -41,7 +44,14 @@ impl Module for TilesModule {
             name: ModuleName::new(NAME).expect("a valid name"),
             version: geko_module_sdk::module_version!().to_owned(),
             contract: module::CONTRACT,
-            routes: vec![route("{z}/{x}/{y}"), route("tilejson.json")],
+            routes: vec![
+                route("{z}/{x}/{y}"),
+                route("tilejson.json"),
+                route("styles.json"),
+                route("styles/{flavor}/{lang}"),
+                route("fonts/{fontstack}/{range}"),
+                route("sprites/{name}"),
+            ],
             openapi: None,
             attribution: Some(serde_json::json!({
                 "produced_work": {

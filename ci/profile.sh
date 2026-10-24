@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # The Planetiler profile of the module: Protomaps Basemap at the commit of planetiler/profile.toml,
 # with planetiler/patches/ applied, compiled into a jar without dependencies (Planetiler itself is
-# downloaded by each installation):
+# downloaded by each installation), and the layers of its styles, for every flavor and language:
 #
-#   ci/profile.sh <folder>   leaves <folder>/protomaps-basemap.jar
+#   ci/profile.sh <folder>   leaves <folder>/protomaps-basemap.jar and <folder>/styles/
 #
 # It compiles in Docker (maven:3-eclipse-temurin-21, the Java of Planetiler 0.10.2), with the jar
-# dated as the commit of the profile, so that the same sources give the same jar. The clone and the
-# Maven repository stay in $CARGO_TARGET_DIR/profile, for the next run.
+# dated as the commit of the profile, so that the same sources give the same jar; the styles, with
+# planetiler/styles.ts in Docker too (node:22-slim, the packages of its package-lock.json). The
+# clone and the Maven and npm caches stay in $CARGO_TARGET_DIR/profile, for the next run.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -37,3 +38,10 @@ docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e MAVEN_CONFIG=/tmp/.m2 \
     -Dspotless.apply.skip=true -Djacoco.skip=true "-Dproject.build.outputTimestamp=$date" package
 cp "$src/tiles/target/protomaps-basemap-HEAD.jar" "$out/protomaps-basemap.jar"
 echo "built the profile (${commit:0:7}, $(ls planetiler/patches/*.patch | wc -l) patches) in $out/protomaps-basemap.jar"
+
+cp planetiler/styles.ts "$src/styles/geko-styles.ts"
+rm -rf "$out/styles" && mkdir -p "$out/styles" "$work/npm"
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e npm_config_cache=/tmp/.npm \
+    -v "$src/styles:/src" -v "$work/npm:/tmp/.npm" -v "$(cd "$out/styles" && pwd):/out" -w /src node:22-slim \
+    sh -c 'npm ci --no-audit --no-fund --silent && npx tsx geko-styles.ts /out'
+echo "generated $(find "$out/styles" -name '*.json' | wc -l) styles in $out/styles"

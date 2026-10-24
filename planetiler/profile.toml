@@ -27,6 +27,14 @@ sha256 = "a535a1df9c6284d9618872984e026ae0352d1f7e9e0605425c0e6114f47351dd"
 url    = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13%2B9/OpenJDK21U-jre_aarch64_linux_hotspot_21.0.13_9.tar.gz"
 sha256 = "b1734db7ade49c3f6acc6ae06233b8c2dd90e3e2f00f67000ae1c972aaa64d8c"
 
+# The fonts and sprites of the Protomaps styles (docs/MODULE_PLAN.md, «Estilos»): basemaps-assets at
+# a fixed commit, downloaded piece by piece from `base`; their sha256 are in planetiler/assets.tsv,
+# written by ci/assets.sh.
+[assets]
+repository = "https://github.com/protomaps/basemaps-assets"
+commit     = "028c18f713baecad011301ff7a69acc39bcc2ae7"
+base       = "https://raw.githubusercontent.com/protomaps/basemaps-assets/028c18f713baecad011301ff7a69acc39bcc2ae7"
+
 # The layers of Natural Earth that the profile reads (patch 0001), as shapefiles from the repository of
 # Natural Earth at the tag of its version: the files of each layer, by their path under `base`.
 [natural_earth]

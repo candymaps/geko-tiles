@@ -1,7 +1,7 @@
 //! The service (docs/MODULE_PLAN.md, «Servicio»): the part of the bundle that `tileset` wrote,
 //! loaded once and swapped whole when a new bundle arrives. A tile is one binary search in the
 //! index, pinned in RAM, and a copy of its bytes from `tiles.bin`, mapped: nothing is decoded or
-//! compressed, and the body is the only allocation.
+//! compressed, and the body is the only allocation. The styles, fonts and sprites are in `styles`.
 
 use std::fmt::Write;
 use std::fs::{self, File};
@@ -16,13 +16,16 @@ use memmap2::Mmap;
 use serde_json::json;
 
 use crate::pmtiles::tile_id;
+use crate::styles::{self, Assets, Styles, Urls};
 use crate::tileset::{self, Meta};
 
 /// A tile of a bundle: the bundle id is in its URL, so it never changes.
 const IMMUTABLE: &str = "public, max-age=31536000, immutable";
-/// What may change with the next bundle: the TileJSON, a tile asked without the id of the bundle in
-/// use, an error.
+/// What may change with the next bundle: the TileJSON, a style, a tile asked without the id of the
+/// bundle in use, an error.
 const REVALIDATE: &str = "no-cache";
+/// The attribution of the tiles: Protomaps asks for it with its styles, and OSM always.
+const ATTRIBUTION: &str = r#"<a href="https://github.com/protomaps/basemaps">Protomaps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>"#;
 
 /// The part of one bundle, ready to serve.
 struct Loaded {
@@ -36,6 +39,10 @@ struct Loaded {
     gzip: bool,
     max_zoom: u8,
     tilejson: Vec<u8>,
+    tile_type: String,
+    styles: Styles,
+    /// The fonts and sprites; a bundle without them serves no style.
+    assets: Option<Assets>,
 }
 
 #[derive(Default)]
@@ -62,7 +69,7 @@ impl Server {
     pub fn load(&self, view: &BundleView) -> Result<()> {
         let meta: Meta = serde_json::from_value(view.module.meta.clone()).map_err(|e| GekoError::Data(format!("bundle {}: the meta of tiles: {e}", view.manifest.version)))?;
         let loaded = open(&view.root.join("tiles"), &meta, &view.manifest.version, &self.url)?;
-        tracing::info!(bundle = %loaded.version, tiles = loaded.ids.len(), "tiles loaded");
+        tracing::info!(bundle = %loaded.version, tiles = loaded.ids.len(), assets = loaded.assets.as_ref().map_or(0, Assets::len), "tiles loaded");
         self.loaded.store(Some(Arc::new(loaded)));
         Ok(())
     }
@@ -71,13 +78,24 @@ impl Server {
         self.loaded.store(None);
     }
 
-    /// Answers `{z}/{x}/{y}` and `tilejson.json`.
+    /// Answers the routes that `describe` declares.
     pub fn handle(&self, request: &Request) -> Response {
         let loaded = self.loaded.load();
+        let param = |name: &str| request.params.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str()).unwrap_or_default();
         let response = match (&*loaded, request.route.as_str()) {
             (None, _) => Response::error(503, "no tiles bundle loaded"),
             (Some(l), "tilejson.json") => Response::new(200, "application/json", l.tilejson.clone()).with_header("Cache-Control", REVALIDATE),
             (Some(l), "{z}/{x}/{y}") => self.tile(l, request),
+            (Some(_), "styles.json") => self.catalog(),
+            (Some(l), "styles/{flavor}/{lang}") => self.style(l, param("flavor"), param("lang")),
+            (Some(l), "fonts/{fontstack}/{range}") => {
+                let range = param("range");
+                let range = range.strip_suffix(".pbf").unwrap_or(range);
+                // A client asks for a list of font stacks, the first one it would like: the first one there is.
+                let path = param("fontstack").split(',').map(|stack| format!("fonts/{}/{range}.pbf", stack.trim())).find(|p| l.assets.as_ref().is_some_and(|a| a.get(p).is_some()));
+                asset(l, path.as_deref(), request)
+            }
+            (Some(l), "sprites/{name}") => asset(l, Some(&format!("sprites/{}", param("name"))), request),
             (Some(_), other) => Response::error(404, &format!("no route {other}")),
         };
         if response.status >= 400 {
@@ -111,6 +129,25 @@ impl Server {
         if l.gzip { response.with_header("Content-Encoding", "gzip") } else { response }
     }
 
+    /// `styles.json`: the styles there are, and the URL of each one.
+    fn catalog(&self) -> Response {
+        let (flavors, langs) = styles::catalog();
+        let body = json!({ "flavors": flavors, "languages": langs, "style": format!("{}/styles/{{flavor}}/{{lang}}.json", self.url) });
+        Response::new(200, "application/json", serde_json::to_vec(&body).expect("JSON values serialize")).with_header("Cache-Control", REVALIDATE)
+    }
+
+    fn style(&self, l: &Loaded, flavor: &str, lang: &str) -> Response {
+        let lang = lang.strip_suffix(".json").unwrap_or(lang);
+        let Some(i) = styles::find(flavor, lang) else {
+            return Response::error(404, &format!("no style {flavor}/{lang}: styles.json lists them"));
+        };
+        if l.assets.is_none() {
+            return Response::error(503, "this bundle has no fonts or sprites: build it again");
+        }
+        let body = l.styles.get(i, &Urls { url: &self.url, version: &l.version, tile_type: &l.tile_type }).to_vec();
+        Response::new(200, "application/json", body).with_header("Content-Encoding", "gzip").with_header("Cache-Control", REVALIDATE)
+    }
+
     pub fn metrics(&self, out: &mut String) {
         let c = &self.counters;
         out.push_str("# HELP geko_tiles_requests_total Tile requests answered, by result: a tile, no tile (204) or an error.\n# TYPE geko_tiles_requests_total counter\n");
@@ -126,6 +163,16 @@ impl Server {
             let _ = writeln!(out, "geko_tiles_index_bytes {}", 16 * l.ids.len());
         }
     }
+}
+
+/// A font or sprite, cached for good under the URL of the bundle in use, as the tiles are.
+fn asset(l: &Loaded, path: Option<&str>, request: &Request) -> Response {
+    let Some((path, (bytes, gzip))) = path.and_then(|p| Some((p, l.assets.as_ref()?.get(p)?))) else {
+        return Response::error(404, "no such font or sprite");
+    };
+    let current = request.query.iter().any(|(k, v)| k == "v" && *v == l.version);
+    let response = Response::new(200, styles::content_type(path), bytes.to_vec()).with_header("Cache-Control", if current { IMMUTABLE } else { REVALIDATE });
+    if gzip { response.with_header("Content-Encoding", "gzip") } else { response }
 }
 
 /// `z`, `x` and `y` of a tile; `y` may end in the extension of the tiles (`.mvt`, `.pbf`, `.mlt`).
@@ -163,6 +210,8 @@ fn open(dir: &Path, meta: &Meta, version: &str, url: &str) -> Result<Loaded> {
         return Err(bad(format!("{} does not match {}", tileset::INDEX, tileset::TILES)));
     }
     let metadata: serde_json::Value = serde_json::from_slice(&fs::read(dir.join(tileset::METADATA))?).map_err(|e| bad(format!("{}: {e}", tileset::METADATA)))?;
+    let assets_dir = dir.join("assets");
+    let assets = if assets_dir.is_dir() { Some(Assets::open(&assets_dir)?) } else { None };
     let (content_type, gzip) = (
         match meta.tile_type.as_str() {
             "mvt" => "application/vnd.mapbox-vector-tile",
@@ -180,6 +229,9 @@ fn open(dir: &Path, meta: &Meta, version: &str, url: &str) -> Result<Loaded> {
         gzip,
         max_zoom: meta.max_zoom,
         tilejson: tilejson(meta, &metadata, version, url),
+        tile_type: meta.tile_type.clone(),
+        styles: Styles::default(),
+        assets,
     })
 }
 
@@ -190,10 +242,12 @@ fn tilejson(meta: &Meta, metadata: &serde_json::Value, version: &str, url: &str)
     });
     let mut tilejson = json!({
         "tilejson": "3.0.0",
-        "name": metadata.get("name"),
-        "description": metadata.get("description"),
+        // Not the name of Protomaps: the profile is patched, and Protomaps asks modified tiles for
+        // another name. Its schema and its version are the description.
+        "name": "geko tiles",
+        "description": format!("Vector tiles of geko, with the schema of the Protomaps Basemap {}", metadata.get("version").and_then(|v| v.as_str()).unwrap_or_default()),
         "version": metadata.get("version"),
-        "attribution": metadata.get("attribution"),
+        "attribution": ATTRIBUTION,
         "scheme": "xyz",
         "tiles": [format!("{url}/{{z}}/{{x}}/{{y}}?v={version}")],
         "minzoom": meta.min_zoom,

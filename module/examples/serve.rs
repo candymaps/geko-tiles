@@ -26,6 +26,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let module = geko_tiles(&meta, root)?;
     println!("loaded in {} ms, RSS {} MB", module.1, rss_mb());
     let module = module.0;
+    // A style, a font and a sprite, as a map asks for them.
+    for (route, params) in [
+        ("styles/{flavor}/{lang}", vec![("flavor", "light"), ("lang", "es.json")]),
+        ("fonts/{fontstack}/{range}", vec![("fontstack", "Noto Sans Regular"), ("range", "0-255.pbf")]),
+        ("sprites/{name}", vec![("name", "light@2x.png")]),
+    ] {
+        let params = params.into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect();
+        let r = module.handle(Request { route: route.into(), params, query: vec![("v".into(), "bench".into())], ..Default::default() });
+        let encoding = r.headers.iter().find(|(k, _)| k == "Content-Encoding").map_or("identity", |(_, v)| v.as_str());
+        println!("{route}: {} {} {} bytes ({encoding})", r.status, r.content_type, r.body.len());
+    }
 
     // Ranges of tiles of each zoom that the boxes touch.
     let ranges: Vec<Vec<(u32, u32, u32, u32)>> = (0..=14u8).map(|z| boxes.iter().map(|b| tiles(b, z)).collect()).collect();

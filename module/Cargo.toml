@@ -19,6 +19,9 @@ toml = "0.8"
 tracing.workspace = true
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
+[build-dependencies]
+flate2 = "1"
+
 [dev-dependencies]
 geko-module-sdk = { workspace = true, features = ["conformance"] }
 tempfile = "3"

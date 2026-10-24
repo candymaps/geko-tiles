@@ -1,7 +1,7 @@
 //! What the tiles module does for `geko plan`, `fetch`, `build` and `purge` (docs/MODULE_PLAN.md,
 //! step 4): download the extracts of the scope and the global inputs, cut the osmdata polygons to
 //! the scope, merge the extracts, run Planetiler once and convert what it leaves into the part of
-//! the bundle. Each stage leaves a stamp beside its folder and is skipped when neither its code nor
+//! the bundle, with the fonts and sprites of the styles beside it. Each stage leaves a stamp beside its folder and is skipped when neither its code nor
 //! its inputs changed.
 
 use std::collections::BTreeMap;
@@ -22,8 +22,8 @@ use geko_module_sdk::{GekoError, Result};
 use crate::config::Config;
 use crate::extracts::{self, Catalog};
 use crate::geo::BBox;
-use crate::inputs::{self, Input, Pins, Source};
-use crate::{pbf, planetiler, shapefile, tileset};
+use crate::inputs::{self, AssetKind, Input, Pins, Source};
+use crate::{assets, pbf, planetiler, shapefile, tileset};
 
 /// The versions of the code of each stage: raising one repeats it and the stages after it.
 const SCOPE_CODE: &str = "1";
@@ -32,8 +32,12 @@ const MERGE_CODE: &str = "1";
 const RUNTIME_CODE: &str = "1";
 const PLANETILER_CODE: &str = "1";
 const CONVERT_CODE: &str = "1";
+const ASSETS_CODE: &str = "1";
 
-const STEPS: u32 = 5;
+const STEPS: u32 = 6;
+
+/// Where the fonts and sprites go in the bundle.
+pub const ASSETS_PART: &str = "tiles/assets";
 
 /// What every step reads: the configuration of the module, and what the host tells it.
 pub struct Setup {
@@ -142,10 +146,21 @@ fn osm_license() -> LicenseNotice {
     }
 }
 
-/// The licenses of the data in the tiles: OSM and each global source.
+/// The design of the styles: CC0, with the attribution Protomaps asks for.
+fn styles_license() -> LicenseNotice {
+    LicenseNotice {
+        source: "protomaps".into(),
+        name: "CC0 1.0".into(),
+        attribution: "Map styles of Protomaps".into(),
+        url: Some("https://github.com/protomaps/basemaps".into()),
+    }
+}
+
+/// The licenses of the data in the tiles and the styles: OSM, each global source, the design of the
+/// styles and their fonts and sprites.
 fn licenses(qrank: bool) -> Vec<LicenseNotice> {
-    let mut list = vec![osm_license()];
-    for source in [Source::NaturalEarth, Source::Osmdata, Source::Daylight, Source::Qrank] {
+    let mut list = vec![osm_license(), styles_license()];
+    for source in [Source::NaturalEarth, Source::Osmdata, Source::Daylight, Source::Qrank, Source::Fonts, Source::Sprites] {
         if source != Source::Qrank || qrank {
             list.extend(source.license());
         }
@@ -253,12 +268,13 @@ fn fetched(setup: &Setup, dl: &dyn Downloader) -> Result<Fetched> {
     }
     downloads.extend(global_downloads(setup, &inputs::pins())?);
     progress::expect(downloads.len() as u64);
+    let outcomes = download_all(&downloads, dl, setup.data.parallel_downloads);
     let (mut downloaded, mut kept) = (0, 0);
-    for d in downloads {
-        match dl.fetch(&d.request, &d.path) {
-            Ok(outcome) => {
-                f.identities.insert(d.path.clone(), format!("sha256 {}", outcome.sha256));
-                if outcome.downloaded { downloaded += 1 } else { kept += 1 }
+    for (d, outcome) in downloads.into_iter().zip(outcomes) {
+        match outcome {
+            Ok((sha256, fresh)) => {
+                f.identities.insert(d.path.clone(), format!("sha256 {sha256}"));
+                if fresh { downloaded += 1 } else { kept += 1 }
                 f.requests.insert(d.path, d.request);
             }
             Err(e) if d.optional => {
@@ -271,13 +287,53 @@ fn fetched(setup: &Setup, dl: &dyn Downloader) -> Result<Fetched> {
                 return Err(GekoError::Data(format!("{e}{hint}")));
             }
         }
-        progress::advance(1);
     }
     if dl.checks_for_updates() {
         mark_checked(setup)?;
     }
     writeln!(f.report, "downloads of the tiles: {downloaded} downloaded, {kept} up to date").unwrap();
     Ok(f)
+}
+
+/// The sha256 of a download, and whether it was downloaded now.
+type Downloaded = (String, bool);
+
+/// Every download, `parallel` at a time (`[data] parallel_downloads`): the sha256 of each one and
+/// whether it was downloaded now, in the order of `downloads`. One after another, the thousand
+/// fonts and sprites took 3 minutes.
+fn download_all(downloads: &[Download], dl: &dyn Downloader, parallel: usize) -> Vec<Result<Downloaded>> {
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results: std::sync::Mutex<Vec<Option<Result<Downloaded>>>> = std::sync::Mutex::new(downloads.iter().map(|_| None).collect());
+    std::thread::scope(|threads| {
+        for _ in 0..parallel.clamp(1, downloads.len().max(1)) {
+            threads.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(d) = downloads.get(i) else { break };
+                    let result = match pinned_and_recorded(dl, d) {
+                        Some(sha256) => Ok((sha256, false)),
+                        None => dl.fetch(&d.request, &d.path).map(|o| (o.sha256, o.downloaded)),
+                    };
+                    progress::advance(1);
+                    results.lock().unwrap_or_else(|e| e.into_inner())[i] = Some(result);
+                }
+            });
+        }
+    });
+    results.into_inner().unwrap_or_else(|e| e.into_inner()).into_iter().map(|r| r.expect("every download was tried")).collect()
+}
+
+/// The checksum of a download pinned by its sha256 that its record says is there (or was removed
+/// after publishing, if the downloader keeps those): its content cannot change, so the source is
+/// not asked again. Without it, every check would ask for each of the thousand fonts and sprites.
+fn pinned_and_recorded(dl: &dyn Downloader, d: &Download) -> Option<String> {
+    let Some(Checksum::Sha256(pin)) = &d.request.checksum else { return None };
+    if !d.path.is_file() && !dl.keeps_removed() {
+        return None;
+    }
+    let record: geko_fetch::RawRecord = serde_json::from_slice(&fs::read(geko_fetch::sidecar(&d.path)).ok()?).ok()?;
+    let size_ok = fs::metadata(&d.path).map_or(true, |m| m.len() == record.size);
+    (record.url == d.request.url && record.sha256.eq_ignore_ascii_case(pin) && size_ok).then_some(record.sha256)
 }
 
 /// Brings back the downloads of `paths` removed after publishing, for a stage that reads them.
@@ -463,13 +519,39 @@ pub fn build(setup: &Setup, dl: &dyn Downloader, force: bool) -> Result<Built> {
     writeln!(out, "converted: {} tiles, {} different, {} MB in {} ms{}", meta["tiles"], meta["contents"], meta["bytes"].as_u64().unwrap_or(0) / 1_000_000, ms(&log), up_to_date(reused)).unwrap();
     log.done("convert", reused);
 
+    // The fonts and sprites of the styles, packed.
+    progress::step("packing the fonts and sprites of the styles", 6, STEPS, Unit::Items);
+    let (sources, links): (Vec<assets::Source>, Vec<(String, String)>) = {
+        let (mut sources, mut links) = (Vec::new(), Vec::new());
+        for asset in inputs::assets(&pins) {
+            match asset.kind {
+                AssetKind::File { source, file, .. } => sources.push(assets::Source { path: asset.path, file: inputs::raw_dir(data_dir, source.id()).join(file) }),
+                AssetKind::Link(target) => links.push((asset.path, target)),
+            }
+        }
+        (sources, links)
+    };
+    let files: Vec<PathBuf> = sources.iter().map(|s| s.file.clone()).collect();
+    let assets_dir = work.join("assets");
+    let key = Key::new("assets").add("code", ASSETS_CODE).add("links", &format!("{links:?}")).inputs(&files, &f.identities)?.finish();
+    let (info, reused) = stage(&assets_dir, key, force, &[], |dir| {
+        restore(setup, &f, &files.iter().map(PathBuf::as_path).collect::<Vec<_>>())?;
+        serde_json::to_value(assets::pack(&sources, &links, dir)?).map_err(|e| GekoError::Other(e.into()))
+    })?;
+    writeln!(out, "packed the fonts and sprites: {} assets, {} different, {} MB in {} ms{}", info["assets"], info["contents"], info["bytes"].as_u64().unwrap_or(0) / 1_000_000, ms(&log), up_to_date(reused)).unwrap();
+    log.done("assets", reused);
+
     Ok(Built {
         report: out,
-        parts: vec![BundlePart { from: bundle_dir, to: "tiles".into() }],
+        parts: vec![BundlePart { from: bundle_dir, to: "tiles".into() }, BundlePart { from: assets_dir, to: ASSETS_PART.into() }],
         meta,
         licenses: licenses(qrank.is_some()),
         stages: log.into_records(),
-        report_extra: serde_json::Map::from_iter([("planetiler".to_owned(), pins.planetiler.version.clone().into()), ("profile".to_owned(), pins.profile.commit.clone().into())]),
+        report_extra: serde_json::Map::from_iter([
+            ("planetiler".to_owned(), pins.planetiler.version.clone().into()),
+            ("profile".to_owned(), pins.profile.commit.clone().into()),
+            ("assets".to_owned(), pins.assets.commit.clone().into()),
+        ]),
     })
 }
 
@@ -481,13 +563,21 @@ pub fn published(setup: &Setup) -> Result<String> {
         return Ok(String::new());
     }
     let mut out = String::new();
-    let mut dirs: Vec<PathBuf> = [Source::NaturalEarth, Source::Osmdata, Source::Daylight, Source::PgfEncoding, Source::Qrank].iter().map(|s| inputs::raw_dir(&setup.data_dir, s.id())).collect();
+    let mut dirs: Vec<PathBuf> = [Source::NaturalEarth, Source::Osmdata, Source::Daylight, Source::PgfEncoding, Source::Qrank, Source::Fonts, Source::Sprites]
+        .iter()
+        .map(|s| inputs::raw_dir(&setup.data_dir, s.id()))
+        .collect();
     dirs.push(setup.osm_dir());
     let (mut files, mut bytes) = (0, 0);
-    for dir in dirs {
+    while let Some(dir) = dirs.pop() {
         let Ok(entries) = fs::read_dir(&dir) else { continue };
         for entry in entries {
             let path = entry?.path();
+            // The fonts are in a folder per font stack.
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             // The records stay, and so do the small files the geocoder and the plan read.
             if name.ends_with(".raw.json") || name.ends_with(".md5") || name.ends_with(".json") || !path.is_file() {

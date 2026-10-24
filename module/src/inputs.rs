@@ -1,6 +1,6 @@
-//! What a build downloads besides the OSM extracts (docs/MODULE_PLAN.md, «Entradas globales» and
-//! «Generador»): the global inputs of the profile and Planetiler with its Java runtime, from their
-//! origin. What `planetiler/profile.toml` pins is checked by its sha256; the rest are refreshed as
+//! What a build downloads besides the OSM extracts (docs/MODULE_PLAN.md, «Entradas globales»,
+//! «Generador» and «Estilos»): the global inputs of the profile, Planetiler with its Java runtime and
+//! the fonts and sprites of the styles, from their origin. What `planetiler/profile.toml` pins is checked by its sha256; the rest are refreshed as
 //! the host's `[data]` says.
 
 use std::collections::BTreeMap;
@@ -18,6 +18,13 @@ pub struct Pins {
     pub planetiler: Pinned,
     pub jre: Jre,
     pub natural_earth: NaturalEarth,
+    pub assets: AssetsPin,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AssetsPin {
+    pub commit: String,
+    pub base: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,6 +72,8 @@ pub enum Source {
     Daylight,
     PgfEncoding,
     Qrank,
+    Fonts,
+    Sprites,
     Planetiler,
     Temurin,
 }
@@ -78,12 +87,14 @@ impl Source {
             Source::Daylight => "daylight",
             Source::PgfEncoding => "pgf-encoding",
             Source::Qrank => "qrank",
+            Source::Fonts => "fonts",
+            Source::Sprites => "sprites",
             Source::Planetiler => "planetiler",
             Source::Temurin => "temurin",
         }
     }
 
-    /// The license of the data it puts into the tiles; `None` for the tools.
+    /// The license of the data it puts into the tiles or the styles; `None` for the tools.
     pub fn license(self) -> Option<LicenseNotice> {
         let notice = |name: &str, attribution: &str, url: &str| {
             Some(LicenseNotice { source: self.id().into(), name: name.into(), attribution: attribution.into(), url: Some(url.into()) })
@@ -93,6 +104,8 @@ impl Source {
             Source::Osmdata => notice("ODbL 1.0", "© OpenStreetMap contributors", "https://osmdata.openstreetmap.de/info/license.html"),
             Source::Daylight => notice("ODbL 1.0", "© OpenStreetMap contributors", "https://daylightmap.org/attribution.html"),
             Source::Qrank => notice("CC0 1.0", "QRank, from Wikimedia page views", "https://github.com/brawer/wikidata-qrank"),
+            Source::Fonts => notice("OFL 1.1", "Noto Sans, © The Noto Project Authors", "https://github.com/protomaps/basemaps-assets/blob/main/fonts/OFL.txt"),
+            Source::Sprites => notice("MIT", "Icons of Tangram, © Mapzen", "https://github.com/tangrams/icons/blob/master/LICENSE.md"),
             Source::PgfEncoding | Source::Planetiler | Source::Temurin => None,
         }
     }
@@ -122,6 +135,45 @@ impl Input {
 
 pub fn raw_dir(data_dir: &Path, source: &str) -> PathBuf {
     data_dir.join("raw").join(source)
+}
+
+/// A font or sprite of the styles (`planetiler/assets.tsv`), by its path in the bundle: `fonts/<font
+/// stack>/<range>.pbf`, `fonts/OFL.txt` or `sprites/<name>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Asset {
+    pub path: String,
+    pub kind: AssetKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssetKind {
+    /// Downloaded and checked by its sha256.
+    File { source: Source, file: String, url: String, sha256: String },
+    /// The same bytes as the asset at this path: a symbolic link of the repository.
+    Link(String),
+}
+
+/// The fonts and sprites, from `planetiler/assets.tsv` (`ci/assets.sh`).
+pub fn assets(pins: &Pins) -> Vec<Asset> {
+    let in_bundle = |path: &str| path.replacen("sprites/v4/", "sprites/", 1);
+    include_str!("../../planetiler/assets.tsv")
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .map(|(path, pin)| {
+            let kind = match pin.strip_prefix('@') {
+                Some(target) => AssetKind::Link(in_bundle(target)),
+                None => {
+                    let (source, file) = match path.strip_prefix("fonts/") {
+                        Some(file) => (Source::Fonts, file),
+                        None => (Source::Sprites, path.rsplit('/').next().unwrap_or(path)),
+                    };
+                    let url = format!("{}/{}", pins.assets.base.trim_end_matches('/'), path.replace(' ', "%20"));
+                    AssetKind::File { source, file: file.to_owned(), url, sha256: pin.to_owned() }
+                }
+            };
+            Asset { path: in_bundle(path), kind }
+        })
+        .collect()
 }
 
 pub const WATER: &str = "water-polygons-split-3857";
@@ -158,6 +210,11 @@ pub fn inputs(pins: &Pins, qrank: bool) -> Result<Vec<Input>> {
     })?;
     let file = jre.url.rsplit('/').next().unwrap_or(&jre.url);
     list.push(input(Source::Temurin, file, &jre.url, Some(&jre.sha256)));
+    for asset in assets(pins) {
+        if let AssetKind::File { source, file, url, sha256 } = asset.kind {
+            list.push(input(source, &file, &url, Some(&sha256)));
+        }
+    }
     Ok(list)
 }
 
@@ -192,5 +249,25 @@ mod tests {
         assert_eq!(ne.path(Path::new("/d")), Path::new("/d/raw/natural-earth/ne_10m_land.shp"));
         let jar = list.iter().find(|i| i.source == Source::Planetiler).unwrap();
         assert_eq!((jar.file.as_str(), jar.sha256.is_some()), ("planetiler-0.10.2.jar", true));
+        let font = list.iter().find(|i| i.source == Source::Fonts && i.file == "Noto Sans Regular/0-255.pbf").unwrap();
+        assert_eq!(font.url, format!("{}/fonts/Noto%20Sans%20Regular/0-255.pbf", pins().assets.base));
+        assert_eq!(font.path(Path::new("/d")), Path::new("/d/raw/fonts/Noto Sans Regular/0-255.pbf"));
+        assert!(list.iter().any(|i| i.source == Source::Sprites && i.file == "light@2x.png"));
+    }
+
+    #[test]
+    fn the_assets_of_the_styles() {
+        let assets = assets(&pins());
+        let files = assets.iter().filter(|a| matches!(a.kind, AssetKind::File { .. })).count();
+        // Four font stacks of 256 ranges, their license, and 5 sprites at two densities, in JSON and PNG.
+        assert_eq!((assets.len(), files), (4 * 256 + 1 + 20, 4 * 256 + 1 + 20 - 252));
+        let link = assets.iter().find(|a| a.path == "fonts/Noto Sans Devanagari Regular v1/0-255.pbf").unwrap();
+        assert_eq!(link.kind, AssetKind::Link("fonts/Noto Sans Regular/0-255.pbf".into()));
+        for a in &assets {
+            if let AssetKind::Link(target) = &a.kind {
+                assert!(assets.iter().any(|b| &b.path == target && matches!(b.kind, AssetKind::File { .. })), "{}", a.path);
+            }
+        }
+        assert!(assets.iter().any(|a| a.path == "sprites/dark@2x.json"));
     }
 }
