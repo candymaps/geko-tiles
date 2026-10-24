@@ -12,18 +12,18 @@
 
 # geko-tiles
 
-The vector tiles module of [geko](https://github.com/candymaps/geko). **Status: it builds, it does not serve yet.** It meets the contract of the host and passes its conformance suite; it downloads what the scope needs, generates the tiles with Planetiler and leaves its part of the bundle (all of Spain in 14 minutes), but still answers 503 to every route, and no version has been published. The machine that builds needs `libfontconfig1` (the Java runtime reads the fonts of the profile with it). The plan, with its decisions and measurements, is in [docs/MODULE_PLAN.md](docs/MODULE_PLAN.md) (in Spanish).
+The vector tiles module of [geko](https://github.com/candymaps/geko). **Status: it builds and serves the tiles; styles, fonts and sprites are missing.** It meets the contract of the host and passes its conformance suite; it downloads what the scope needs, generates the tiles with Planetiler, leaves its part of the bundle (all of Spain in 14 minutes) and serves it, but no version has been published. The machine that builds needs `libfontconfig1` (the Java runtime reads the fonts of the profile with it). The plan, with its decisions and measurements, is in [docs/MODULE_PLAN.md](docs/MODULE_PLAN.md) (in Spanish).
 
-What it will serve, under `/tiles/`:
+What it serves, under `/tiles/`:
 
-- **Vector tiles** (`/tiles/{z}/{x}/{y}`), MVT by default and MLT as an option, up to zoom 14, with the [Protomaps Basemap](https://github.com/protomaps/basemaps) schema.
-- **A TileJSON** (`/tiles/tilejson.json`) with the attribution and versioned tile URLs, cached forever by clients and CDNs.
-- **Styles, fonts and sprites**, as static data: any style can paint the tiles, and the server never knows which one.
+- **Vector tiles** (`/tiles/{z}/{x}/{y}`), MVT by default and MLT as an option, up to zoom 14, with the [Protomaps Basemap](https://github.com/protomaps/basemaps) schema. A tile that does not exist answers 204, which clients take as empty.
+- **A TileJSON** (`/tiles/tilejson.json`) with the attribution, the layers, the bounds of the scope and versioned tile URLs (`?v=<bundle>`): those tiles are cached forever by clients and CDNs, and a new bundle changes the URLs.
+- **Styles, fonts and sprites** (not yet), as static data: any style can paint the tiles, and the server never knows which one.
 
 On top of the same foundation as the rest of geko:
 
 - **Fully automatic:** it downloads what the scope of `geko.toml` needs (the OSM extracts, the Natural Earth layers it uses, the water and land polygons, cut to the scope on the machine), builds the tiles and keeps them up to date.
-- **Fast and lightweight:** a tile is one lookup in an index pinned in RAM and a copy of its bytes, already compressed.
+- **Fast and lightweight:** a tile is one lookup in an index pinned in RAM and a copy of its bytes, already compressed: about 2 µs, and millions of tiles per second (all of Spain: 1.17 GB on disk, 9 MB in RAM).
 - **Any combination of countries and regions**, in a single build.
 
 [Planetiler](https://github.com/onthegomap/planetiler) generates the tiles, during the build only, in a process of its own: the JVM never enters geko. The module downloads the official `planetiler.jar` and a Java runtime (Temurin) from their origin, checked against fixed checksums.
@@ -41,6 +41,7 @@ Its own options go in `geko-tiles.toml`, beside `geko.toml`; every one is option
 
 ```toml
 format = "mvt"        # or "mlt": about 10 % smaller, read only by MapLibre GL JS 5.12 and later
+url = "/tiles"        # where clients fetch the tiles, as tilejson.json writes it: an absolute URL behind a CDN or a proxy with a prefix
 
 [osm]
 mirror = "auto"       # Geofabrik, or the URL of a mirror with its layout (the extracts are shared with the geocoder)

@@ -5,14 +5,23 @@
 use geko_module_sdk::{GekoError, Result};
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// `mvt`, which every client reads, or `mlt`, about 10 % smaller, which only MapLibre GL JS
     /// 5.12 and later reads (docs/MODULE_PLAN.md, «Formato de las teselas»).
     pub format: Format,
+    /// Where clients fetch the tiles, as `tilejson.json` writes it: `/tiles`, on the host that
+    /// answered, or an absolute URL (a CDN in front of geko, a prefix of a reverse proxy).
+    pub url: String,
     pub osm: OsmConfig,
     pub planetiler: PlanetilerConfig,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self { format: Format::default(), url: "/tiles".into(), osm: OsmConfig::default(), planetiler: PlanetilerConfig::default() }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]

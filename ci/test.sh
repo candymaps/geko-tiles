@@ -40,7 +40,7 @@ only() {
 # write down here.
 architecture() {
     local failed=0
-    only "geko-module-tiles depends on" "flate2 geko-fetch geko-module-sdk osmpbf serde serde_json tar toml tracing zip" "$(direct_dependencies geko-module-tiles)" || failed=1
+    only "geko-module-tiles depends on" "arc-swap flate2 geko-fetch geko-module-sdk memmap2 osmpbf serde serde_json tar toml tracing zip" "$(direct_dependencies geko-module-tiles)" || failed=1
     only "geko-module-tiles-dylib depends on" "geko-module-sdk geko-module-tiles tracing-subscriber" "$(direct_dependencies geko-module-tiles-dylib)" || failed=1
     return $failed
 }

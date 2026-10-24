@@ -1,6 +1,6 @@
 # tiles: plan
 
-Estado: el build está hecho (paso 4); el servicio, no. El módulo cumple el contrato de geko (`contract-1`, [docs/MODULES.md del host](https://github.com/candymaps/geko/blob/main/docs/MODULES.md)) y pasa su suite de conformidad: descarga lo que necesita el ámbito, genera las teselas con Planetiler y deja su parte del bundle, pero declara `/tiles/{z}/{x}/{y}` y `/tiles/tilejson.json` y aún responde 503 a todo. Su publicación (`ci/modules.sh`, `publish.yml`) está lista, pero no se ha publicado ninguna versión, así que el host lo deja desactivado por defecto (`tiles = true` en `geko.toml` lo activa).
+Estado: el build y el servicio están hechos (pasos 4 y 5); faltan los estilos, fuentes y sprites. El módulo cumple el contrato de geko (`contract-1`, [docs/MODULES.md del host](https://github.com/candymaps/geko/blob/main/docs/MODULES.md)) y pasa su suite de conformidad: descarga lo que necesita el ámbito, genera las teselas con Planetiler, deja su parte del bundle y la sirve en `/tiles/{z}/{x}/{y}` y `/tiles/tilejson.json`. Su publicación (`ci/modules.sh`, `publish.yml`) está lista, pero no se ha publicado ninguna versión, así que el host lo deja desactivado por defecto (`tiles = true` en `geko.toml` lo activa).
 
 ## Objetivo
 
@@ -45,7 +45,7 @@ Planetiler deja un PMTiles del ámbito, que es solo un formato de trabajo. Una e
 
 ### Formato de las teselas: MVT, y MLT como opción (2026-10-24)
 
-Las teselas son para cualquiera que use el motor, con el cliente que quiera (MapLibre, OpenLayers, QGIS, apps móviles, versiones antiguas…). MLT solo lo lee MapLibre GL JS desde la 5.12.0 (`encoding: "mlt"` en la fuente) y su especificación aún evoluciona, así que **MVT por defecto**. MLT, un 10 % menor con Baleares, queda como opción de `geko-tiles.toml` (`format = "mvt" | "mlt"`) para quien controle sus clientes: Planetiler genera los dos con `--tile_format` y el servicio solo copia bytes. Falta ver cómo lo anuncia `tilejson.json` a los clientes.
+Las teselas son para cualquiera que use el motor, con el cliente que quiera (MapLibre, OpenLayers, QGIS, apps móviles, versiones antiguas…). MLT solo lo lee MapLibre GL JS desde la 5.12.0 (`encoding: "mlt"` en la fuente) y su especificación aún evoluciona, así que **MVT por defecto**. MLT, un 10 % menor con Baleares, queda como opción de `geko-tiles.toml` (`format = "mvt" | "mlt"`) para quien controle sus clientes: Planetiler genera los dos con `--tile_format` y el servicio solo copia bytes. TileJSON no tiene campo para el formato: `tilejson.json` lleva `"encoding": "mvt" | "mlt"` (fuera del estándar, el nombre de la opción de MapLibre), y el estilo pone `encoding: "mlt"` en la fuente.
 
 ### Varios extractos: fusionados antes, una sola ejecución (2026-10-24)
 
@@ -85,7 +85,7 @@ Cerrados con Baleares («Medidas»): la compresión (el gzip de Planetiler; brot
 2. **Puesta al día del repositorio** (hecho, 2026-10-24): la SDK en la etiqueta `sdk-1`, README y AGENTS.md como los del geocoder, el secreto `GEKO_PACK_SIGNING_KEY` (firma el módulo al publicarlo) y la decisión de licencias por escrito (abajo).
 3. **Perfil** (hecho, 2026-10-24): Protomaps en el commit de `planetiler/profile.toml` con los cuatro parches de `planetiler/patches/` (Natural Earth por capas, la cadena vacía como valor ausente, osmdata ya recortado y ninguna descarga propia: qrank opcional, pgf-encoding dado). `ci/profile.sh` lo compila en Docker, con la fecha del commit, y da el mismo jar byte a byte; `ci/test.sh` (`profile`) comprueba que los parches se aplican y compila, y `ci/modules.sh` lo mete en el paquete del módulo. Con Baleares da las mismas teselas que la prueba con `--bounds=world`, en 45 s. `planetiler/profile.toml` fija también `planetiler.jar` y el JRE de Temurin (21.0.13+9), con sus sha256, para el paso 4.
 4. **Build** (hecho, 2026-10-24): `plan`, `fetch` y `build` (`module/src/pipeline.rs`). Descarga con el `Downloader` del host (`geko-fetch`, como el geocoder) los extractos de Geofabrik (los mismos ficheros que el geocoder, en `raw/osm/`; la elección por país y región está en `module/countries.toml`), las 55 piezas de Natural Earth, osmdata, Daylight, pgf-encoding, qrank (opcional), `planetiler.jar` y el JRE, los fijados con su sha256 de `planetiler/profile.toml`. Las etapas, cada una con su sello en `<datos>/tiles/`: `scope` (las cajas del ámbito, del encabezado de cada extracto), `osmdata` (el recorte, `module/src/shapefile.rs`), `osm` (la fusión, solo con varios extractos), `runtime` (el JRE desempaquetado), `planetiler` (la clave lleva las versiones de Planetiler, del perfil y del JRE, el formato y lo que lee; no la memoria, los hilos ni el almacenamiento, que no cambian las teselas) y `bundle` (la conversión, `module/src/tileset.rs`, que es la parte del bundle, `tiles/`). Las licencias de cada fuente van al manifiesto, y `meta` lleva el formato, el tipo de tesela, la compresión y las cajas del ámbito para el servicio. Tras publicar, con `keep_downloads = false`, borra las descargas de datos y deja su ficha; una etapa que tenga que repetirse las vuelve a bajar. `module/examples/build.rs` lanza un build sin el host, para medir. Medido con Baleares, La Rioja y Navarra, y España («Medidas»).
-5. **Servicio:** el índice, las rutas, `tilejson.json` con las URL versionadas y las métricas (`geko_tiles_*`). Latencia (p50 y p99) y caudal con 16 a la vez, anotados en «Optimizations».
+5. **Servicio** (hecho, 2026-10-24): `module/src/serve.rs`. `load` lee el índice a RAM, mapea `tiles.bin` (`memmap2`), comprueba que cada entrada cae dentro y cambia de bundle de golpe (`arc-swap`); si el nuevo falla, sigue el de antes. `/tiles/{z}/{x}/{y}` (admite `.mvt`, `.pbf` y `.mlt` tras `y`): 200 con `Content-Encoding: gzip`, 204 si no hay tesela, 404 por encima del zoom máximo, 400 si las coordenadas no valen; `Cache-Control: public, max-age=31536000, immutable` solo si `?v=` es el bundle en uso, y `no-cache` si no (una URL sin versión o de otro bundle puede cambiar). `/tiles/tilejson.json` (TileJSON 3.0, `no-cache`): nombre, atribución y `vector_layers` del `metadata.json` de Planetiler, los zooms, `bounds` y `center` de las cajas del ámbito, `encoding` y las teselas en `<url>/{z}/{x}/{y}?v=<id del bundle>`, con `url = "/tiles"` de `geko-tiles.toml` (una URL absoluta para una CDN o un proxy con prefijo). Métricas: `geko_tiles_requests_total{result=tile|empty|error}`, `geko_tiles_sent_bytes_total`, `geko_tiles_loaded` y `geko_tiles_index_bytes`. `module/examples/serve.rs` lo mide sin el host («Medidas»).
 6. **Estilos, fuentes y sprites** de Protomaps servidos desde el bundle; la demo del host con las teselas propias.
 7. **Comprobaciones:** un golden de teselas de Baleares (unas cuantas teselas de referencia comparadas byte a byte con datos congelados, como el del geocoder), pruebas del índice con teselas sintéticas y de la fusión de extractos con PBF sintéticos (objetos repetidos, orden, determinismo), y la conformidad.
 8. **Publicación:** la primera versión publicada; `tiles` entra en `ci/modules` del host y vuelve a estar activo por defecto.
@@ -128,7 +128,7 @@ Perfil de Protomaps (`42ffaaa`, Planetiler 0.10.2) en `eclipse-temurin:21-jre`, 
 2. **MLT:** −10 % de disco y de red, sin coste en el build. Queda como opción; por defecto, MVT («Formato de las teselas»).
 3. **Zoom máximo 14:** la mitad que z15, con sobrezoom en el cliente.
 4. **Las entradas globales son el problema del build**, en tiempo (el 77 %), en descarga y en disco, y algunas dependen de servicios ajenos e inestables (qrank). Se resuelve sin paquetes publicados: Natural Earth por capas, osmdata recortado en local y qrank opcional («Entradas globales»).
-5. **Índice propio:** con run-lengths, unos 180 KB para Baleares; falta medirlo con España (aplazado al paso 4).
+5. **Índice propio:** con run-lengths, unos 180 KB para Baleares; sin ellos, 8,7 MB para España. Se queda sin run-lengths (paso 5, «Medidas»).
 
 ### Varios extractos: La Rioja y Navarra, 2026-10-24
 
@@ -174,4 +174,18 @@ El `planetiler.jar` oficial con el perfil parcheado («Entradas globales»), z14
 - **Memoria del módulo:** 28 MB el recorte (lee los zips en flujo), 62 MB la fusión de España (un bloque por extracto a la vez), 65 MB la conversión. Planetiler con España: *heap* de 3,6 GB de 4,2 GB en el pico, 13 núcleos de media; 4 GB bastan.
 - **Fusión de España:** 215 millones de objetos en 96 s, solo 103 repetidos (Canarias apenas toca a España). La Rioja y Navarra: 100.357 repetidos de 7,2 millones, en 3,6 s. Un solo hilo: si hace falta, paralelizar la descompresión y la compresión de bloques.
 - **Teselas de más en Planetiler:** el recorte de osmdata guarda las teselas z6 enteras que tocan el ámbito, porque el perfil usa los polígonos de agua y tierra desde z6 y esas teselas los necesitan completos. Pero Planetiler genera entonces todos los zooms de esos cuadrados: con España, 2,1 millones de teselas, de las que la conversión guarda 565.000 (con Baleares, 353.000 y 43.000). Es lo más caro que queda (unos 20 s de los 64 de Baleares). Ver «Por decidir».
-- **Índice:** 16 B por tesela, sin run-lengths: 8,7 MB para España, en RAM. Con run-lengths, mucho menos (las repetidas son el 60 %); se decide con las medidas del servicio (paso 5).
+- **Índice:** 16 B por tesela, sin run-lengths: 8,7 MB para España, en RAM. Con run-lengths, mucho menos (las repetidas son el 60 %); decidido con las medidas del servicio (paso 5): no hace falta.
+
+### El servicio: España, 2026-10-24 (paso 5)
+
+`module/examples/serve.rs` en `--release`, en WSL (16 hilos, 15 GB), con el bundle de España del paso 4 (565.277 teselas, 1,17 GB) y la caché de páginas ya caliente: llama a `handle` como el host, sin HTTP, con teselas al azar de las cajas del ámbito y todos los zooms de 0 a 14 igual de probables (23 KB de media por tesela: pesan las de zoom bajo).
+
+| Hilos | Peticiones/s | p50 | p99 | p99,9 |
+|---|---|---|---|---|
+| 1 | 700.000 | 0,9 µs | 8,0 µs | 18,9 µs |
+| 16 | 4,9 millones | 1,7 µs | 13,5 µs | 56 µs |
+
+- **Carga:** 30 ms (leer el índice de 8,7 MB y comprobarlo entero); 11 MB de RSS antes de servir. Lo demás es `tiles.bin` mapeado, en la caché de páginas del sistema.
+- **Contadores:** sin los dos contadores atómicos de cada tesela, 5,06 millones por segundo en vez de 4,86 (un 4 %, dentro del ruido): se quedan.
+- **Run-lengths en el índice:** no compensan. El índice de España ocupa 8,7 MB y la búsqueda no es lo que cuesta: el tiempo se va en copiar el cuerpo. El servicio queda muy por debajo de lo que tarda el HTTP del host.
+- Falta medirlo en frío (sin la caché de páginas) y por HTTP, con el host.

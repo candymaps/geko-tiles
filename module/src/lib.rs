@@ -1,7 +1,6 @@
 //! The tiles module (docs/MODULE_PLAN.md): it downloads the OSM extracts of the scope and the
 //! global inputs of the Protomaps profile, runs Planetiler once and converts its tiles into its part
-//! of the bundle. It declares its routes, under `/tiles/`, and answers 503 until the service is
-//! written (step 5).
+//! of the bundle. It serves them under `/tiles/` (`serve`).
 
 mod config;
 mod extracts;
@@ -11,13 +10,14 @@ mod pbf;
 mod pipeline;
 mod planetiler;
 mod pmtiles;
+mod serve;
 mod shapefile;
 mod tileset;
 
 use std::time::Duration;
 
 use geko_module_sdk::Result;
-use geko_module_sdk::module::{self, Built, Context, Description, Method, Module, ModuleName, Purge, Request, Response, Route};
+use geko_module_sdk::module::{self, Built, BundleView, Context, Description, Method, Module, ModuleName, Purge, Request, Response, Route};
 
 use crate::pipeline::Setup;
 
@@ -25,11 +25,13 @@ pub const NAME: &str = "tiles";
 
 pub fn open(context: Context) -> Result<Box<dyn Module>> {
     let config = config::Config::parse(&context.config, &context.config_file)?;
-    Ok(Box::new(TilesModule { setup: Setup { config, scope: context.scope, data_dir: context.data_dir, data: context.data } }))
+    let server = serve::Server::new(&config.url);
+    Ok(Box::new(TilesModule { setup: Setup { config, scope: context.scope, data_dir: context.data_dir, data: context.data }, server }))
 }
 
 pub struct TilesModule {
     setup: Setup,
+    server: serve::Server,
 }
 
 impl Module for TilesModule {
@@ -82,7 +84,20 @@ impl Module for TilesModule {
         }
     }
 
-    fn handle(&self, _: Request) -> Response {
-        Response::error(503, "no tiles bundle loaded")
+    fn load(&self, bundle: &BundleView) -> Result<()> {
+        self.server.load(bundle)
+    }
+
+    fn handle(&self, request: Request) -> Response {
+        self.server.handle(&request)
+    }
+
+    fn metrics(&self, out: &mut String) {
+        self.server.metrics(out);
+    }
+
+    fn shutdown(&self) -> Result<()> {
+        self.server.shutdown();
+        Ok(())
     }
 }

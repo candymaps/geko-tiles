@@ -185,7 +185,6 @@ fn rotate(n: u64, x: &mut u64, y: &mut u64, rx: u64, ry: u64) {
 }
 
 /// The id of a tile: the tiles of every lower zoom, then its place on the Hilbert curve of its zoom.
-#[allow(dead_code)] // The service (step 5) looks tiles up by it.
 pub fn tile_id(z: u8, x: u32, y: u32) -> u64 {
     let base = ((1u64 << (2 * u32::from(z))) - 1) / 3;
     let n = 1u64 << z;
