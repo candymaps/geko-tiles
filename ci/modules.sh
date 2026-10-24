@@ -14,7 +14,7 @@
 # its manifest says the three in its annotations (geko.version, geko.contract, geko.platform), so
 # that geko can refuse one that is not for it before downloading it.
 #
-# The signing tool, geko-module-sign, comes from the host at the commit of the SDK in Cargo.toml.
+# The signing tool, geko-module-sign, comes from the host at the commit of the SDK in Cargo.lock.
 # `build` must run on a system as old as the image of
 # geko (debian:bookworm-slim): a module that needs a newer glibc does not start in it. The CI runs
 # it in rust:<toolchain>-bookworm. Publishing needs GEKO_PACK_SIGNING_KEY (hex), the key of the
@@ -28,10 +28,11 @@ registry=${GEKO_MODULES_REGISTRY:-ghcr.io/candymaps}
 field() { tr -d '\r' < "$2" | sed -n "s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *\$/\1/p" | head -1; }
 
 sign_tool() {
-    local sdk rev
-    sdk=$(tr -d '\r' < Cargo.toml | grep '^geko-module-sdk *=')
-    rev=$(sed -n 's/.*rev *= *"\([^"]*\)".*/\1/p' <<< "$sdk")
-    cargo install --locked --quiet --git "$(sed -n 's/.*git *= *"\([^"]*\)".*/\1/p' <<< "$sdk")" --rev "$rev" \
+    local source rev
+    # The SDK as Cargo.lock resolved it: git+<url>?tag=sdk-<contract>#<commit>.
+    source=$(tr -d '\r' < Cargo.lock | grep -A2 '^name = "geko-module-sdk"$' | sed -n 's/^source = "git+\(.*\)"$/\1/p')
+    rev=${source##*#}
+    cargo install --locked --quiet --git "${source%%\?*}" --rev "$rev" \
         --root "$target/tools/$rev" geko-artifact --bin geko-module-sign >&2
     echo "$target/tools/$rev/bin/geko-module-sign"
 }
