@@ -10,4 +10,4 @@ Todo desarrollo sale de `dev` a una rama propia (`feature/<nombre>`, `bugfix/<no
 
 ## Comprobaciones
 
-Antes de abrir el PR, pasa `make test` (o `ci/test.sh`). Las reglas del proyecto están en [AGENTS.md](AGENTS.md), y la especificación en [PROJECT.md](docs/PROJECT.md).
+Antes de abrir el PR, pasa `ci/test.sh`. Las reglas del proyecto están en [AGENTS.md](AGENTS.md), y el plan del módulo en [MODULE_PLAN.md](docs/MODULE_PLAN.md).
