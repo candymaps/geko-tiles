@@ -63,14 +63,15 @@ build() {
     name=$(field name module/module.toml)
     kind=$(field kind module/module.toml)
     entry=$(field entry module/module.toml)
-    GEKO_MODULE_VERSION=$version cargo build --release --locked -p "geko-module-$name-dylib"
+    # The Planetiler profile, built before by ci/profile.sh (it needs Docker, and this runs in a
+    # container), goes into the library (module/build.rs).
+    [ -f "$target/profile/out/protomaps-basemap.jar" ] \
+        || { echo "no profile: run ci/profile.sh $target/profile/out first" >&2; return 1; }
+    GEKO_MODULE_VERSION=$version GEKO_TILES_PROFILE=$(cd "$target/profile/out" && pwd)/protomaps-basemap.jar \
+        cargo build --release --locked -p "geko-module-$name-dylib"
     rm -rf "${out:?}/$name"
     mkdir -p "$out/$name"
     cp "$target/release/$entry" "$out/$name/$entry"
-    # The Planetiler profile, built before by ci/profile.sh (it needs Docker, and this runs in a container).
-    [ -f "$target/profile/out/protomaps-basemap.jar" ] \
-        || { echo "no profile: run ci/profile.sh $target/profile/out first" >&2; return 1; }
-    cp "$target/profile/out/protomaps-basemap.jar" "$out/$name/"
     printf 'kind = "%s"\nentry = "%s"\nname = "%s"\nversion = "%s"\ncontract = %s\nplatform = "%s"\n' \
         "$kind" "$entry" "$name" "$version" "$contract" "$platform" > "$out/$name/module.toml"
     echo "built $name $version (contract $contract, $platform) in $out/$name"

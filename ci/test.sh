@@ -35,11 +35,12 @@ only() {
 }
 
 # What the dependency graph can show of the rules of the host (its AGENTS.md): the module knows the
-# host only through the contract of the SDK. A new dependency is either a rule broken or a decision
-# to write down here.
+# host only through the contract of the SDK, and downloads only with its Downloader (geko-fetch, as
+# the geocoder): no HTTP client of its own. A new dependency is either a rule broken or a decision to
+# write down here.
 architecture() {
     local failed=0
-    only "geko-module-tiles depends on" "geko-module-sdk tracing" "$(direct_dependencies geko-module-tiles)" || failed=1
+    only "geko-module-tiles depends on" "flate2 geko-fetch geko-module-sdk osmpbf serde serde_json tar toml tracing zip" "$(direct_dependencies geko-module-tiles)" || failed=1
     only "geko-module-tiles-dylib depends on" "geko-module-sdk geko-module-tiles tracing-subscriber" "$(direct_dependencies geko-module-tiles-dylib)" || failed=1
     return $failed
 }

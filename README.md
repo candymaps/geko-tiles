@@ -12,7 +12,7 @@
 
 # geko-tiles
 
-The vector tiles module of [geko](https://github.com/candymaps/geko). **Status: a skeleton.** It meets the contract of the host and passes its conformance suite, declares its routes and answers 503 to all of them: it builds nothing yet, and no version has been published. The plan, with its decisions and measurements, is in [docs/MODULE_PLAN.md](docs/MODULE_PLAN.md) (in Spanish).
+The vector tiles module of [geko](https://github.com/candymaps/geko). **Status: it builds, it does not serve yet.** It meets the contract of the host and passes its conformance suite; it downloads what the scope needs, generates the tiles with Planetiler and leaves its part of the bundle (all of Spain in 14 minutes), but still answers 503 to every route, and no version has been published. The machine that builds needs `libfontconfig1` (the Java runtime reads the fonts of the profile with it). The plan, with its decisions and measurements, is in [docs/MODULE_PLAN.md](docs/MODULE_PLAN.md) (in Spanish).
 
 What it will serve, under `/tiles/`:
 
@@ -36,6 +36,23 @@ Not available yet: no version of the module has been published, and the host kee
 [modules]
 tiles = true
 ```
+
+Its own options go in `geko-tiles.toml`, beside `geko.toml`; every one is optional:
+
+```toml
+format = "mvt"        # or "mlt": about 10 % smaller, read only by MapLibre GL JS 5.12 and later
+
+[osm]
+mirror = "auto"       # Geofabrik, or the URL of a mirror with its layout (the extracts are shared with the geocoder)
+
+[planetiler]
+memory = "4g"         # heap of the Java process (-Xmx)
+threads = 0           # 0: one per core
+storage = "mmap"      # or "ram": where Planetiler keeps its temporary data
+qrank = true          # download QRank to order places and POIs; the build goes on without it
+```
+
+Downloading requires `[data] accept_licenses = true` in `geko.toml`, as for every module. Planetiler's memory, threads and storage change how fast the build runs and how much memory it takes, never the tiles.
 
 ## License
 

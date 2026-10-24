@@ -11,6 +11,8 @@ license = "AGPL-3.0-only"
 [workspace.dependencies]
 # The contract, from the repository of the host (docs/MODULES.md there), at its tag sdk-<contract>.
 geko-module-sdk = { git = "https://github.com/candymaps/geko.git", tag = "sdk-1" }
+# The Downloader of the host (PROJECT.md §7.2 there), the same as the geocoder's.
+geko-fetch = { git = "https://github.com/candymaps/geko.git", tag = "sdk-1" }
 geko-module-tiles = { path = "module" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
