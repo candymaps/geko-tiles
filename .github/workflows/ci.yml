@@ -1,8 +1,10 @@
 # The checks of every pull request. On a pull request (or by hand), `test` finds whether it changes
 # what the checks build (ci/affected.sh) and, if it does, runs the whole ci/test.sh on it. It is the
 # status that the protection of main and dev requires: it always runs, and passes when the checks
-# passed or were not needed. pr-comment.yml says on the pull request which of the two it was. What
-# reaches main, already checked, is published by publish.yml.
+# passed or were not needed. pr-comment.yml says on the pull request which of the two it was.
+# `golden`, under the same condition, builds Baleares on the frozen data of golden/snapshot and
+# compares it with golden/baseline.json (ci/test.sh --variant golden). What reaches main, already
+# checked, is published by publish.yml.
 name: ci
 
 on:
@@ -67,3 +69,68 @@ jobs:
           name: pr
           path: pr.json
           retention-days: 1
+
+  # The golden of the tiles, if the pull request changes what the checks build (ci/affected.sh), on
+  # the frozen data of golden/snapshot: the package ghcr.io/candymaps/geko-tiles/golden, read with the
+  # token of the workflow. As in `test`, the checks are skipped step by step, never the job.
+  golden:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      GEKO_GOLDEN_DIR: ${{ github.workspace }}/.geko-golden
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: affected
+        run: |
+          run=1
+          if [ "${{ github.event_name }}" = pull_request ] && [ -z "$(ci/affected.sh HEAD^1 HEAD)" ]; then
+            run=0
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "run $run"
+      - if: steps.affected.outputs.run == '1'
+        uses: oras-project/setup-oras@v1
+      - if: steps.affected.outputs.run == '1'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+      # A snapshot not published yet has nothing to compare with: publish it with
+      # ci/golden-snapshot.sh publish.
+      - if: steps.affected.outputs.run == '1'
+        run: |
+          file=$(sed -n 's/^file=//p' golden/snapshot)
+          tag=${file#golden-}
+          ref="ghcr.io/candymaps/geko-tiles/golden:${tag%.tar.gz}"
+          oras manifest fetch "$ref" > /dev/null || { echo "::error::$ref is not published"; exit 1; }
+      - env:
+          HOST_TOKEN: ${{ secrets.GEKO_HOST_TOKEN }}
+        if: steps.affected.outputs.run == '1' && env.HOST_TOKEN != ''
+        run: git config --global url."https://x-access-token:$HOST_TOKEN@github.com/candymaps/geko.git".insteadOf https://github.com/candymaps/geko.git
+      - if: steps.affected.outputs.run == '1'
+        run: rustup toolchain install
+      # The Java runtime of Planetiler reads the fonts of the profile with it.
+      - if: steps.affected.outputs.run == '1'
+        run: sudo apt-get install -y libfontconfig1
+      - if: steps.affected.outputs.run == '1'
+        uses: Swatinem/rust-cache@v2
+      # The snapshot, and what planetiler/profile.toml pins (Natural Earth, Planetiler, the JRE, the
+      # fonts and sprites), which never change under the same pins.
+      - if: steps.affected.outputs.run == '1'
+        uses: actions/cache@v4
+        with:
+          path: |
+            .geko-golden/snapshots
+            .geko-golden/raw
+          key: geko-golden-${{ hashFiles('golden/snapshot', 'planetiler/profile.toml', 'planetiler/assets.tsv') }}
+      - if: steps.affected.outputs.run == '1'
+        run: ci/test.sh --variant golden
+      - if: always() && steps.affected.outputs.run == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-report
+          path: |
+            .geko-golden/report.json
+            .geko-golden/build.log
+          if-no-files-found: ignore
