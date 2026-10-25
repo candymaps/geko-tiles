@@ -42,8 +42,8 @@ Its own options go in `geko-tiles.toml`, beside `geko.toml`; every one is option
 ```toml
 format = "mvt"        # or "mlt": about 10 % smaller, read only by MapLibre GL JS 5.12 and later
 url = "/tiles"        # where clients fetch the tiles, fonts and sprites, as tilejson.json and the styles write it: absolute
-                      # (https://maps.example.com/tiles) for clients that load a style by its URL (MapLibre needs the sprite
-                      # absolute), behind a CDN or behind a proxy with a prefix
+                      # (https://maps.example.com/tiles) for clients that load a style or a TileJSON by its URL (MapLibre
+                      # needs the tiles and the sprite absolute), behind a CDN or behind a proxy with a prefix
 
 [osm]
 mirror = "auto"       # Geofabrik, or the URL of a mirror with its layout (the extracts are shared with the geocoder)
