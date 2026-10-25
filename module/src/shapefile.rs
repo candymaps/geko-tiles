@@ -149,11 +149,11 @@ fn cut_dbf<R: Read>(mut dbf: R, out_dbf: &Path, kept: &[u64], total: u64) -> io:
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A shapefile of polygons with these boxes (one ring, the box itself), as a zip.
-    fn zip_of(boxes: &[[f64; 4]]) -> Vec<u8> {
+    pub(crate) fn zip_of(boxes: &[[f64; 4]]) -> Vec<u8> {
         let mut shp = Vec::new();
         let mut shx = Vec::new();
         let mut header = vec![0u8; HEADER];

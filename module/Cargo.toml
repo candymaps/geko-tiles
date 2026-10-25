@@ -24,4 +24,5 @@ flate2 = "1"
 
 [dev-dependencies]
 geko-module-sdk = { workspace = true, features = ["conformance"] }
+sha2 = "0.10"
 tempfile = "3"

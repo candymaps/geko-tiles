@@ -267,6 +267,7 @@ fn tilejson(meta: &Meta, metadata: &serde_json::Value, version: &str, url: &str)
 mod tests {
     use super::*;
     use crate::geo::BBox;
+    use crate::assets;
     use crate::pmtiles::tests::archive;
     use geko_module_sdk::bundle::{BundleManifest, BundleModule};
     use geko_module_sdk::module::{CONTRACT, ModuleName};
@@ -336,5 +337,102 @@ mod tests {
         fs::write(broken.join("tiles").join(tileset::TILES), b"short").unwrap();
         assert!(server.load(&view(&broken, "b2", &meta)).is_err());
         assert_eq!(get(&server, "tilejson.json", &[], &[]).body, r.body);
+    }
+
+    /// Two fonts, a link of a third one to the first, and a sprite, packed into `out`.
+    fn pack_assets(tmp: &Path, out: &Path) {
+        let file = |name: &str, bytes: &[u8]| {
+            let path = tmp.join(name);
+            fs::write(&path, bytes).unwrap();
+            path
+        };
+        let sources = [
+            assets::Source { path: "fonts/Noto Sans Regular/0-255.pbf".into(), file: file("regular", &[1u8; 2048]) },
+            assets::Source { path: "fonts/Noto Sans Medium/0-255.pbf".into(), file: file("medium", &[2u8; 2048]) },
+            assets::Source { path: "sprites/light.png".into(), file: file("png", b"\x89PNG") },
+            assets::Source { path: "sprites/light.json".into(), file: file("json", b"{}") },
+        ];
+        let links = [("fonts/Noto Sans Devanagari Regular v1/0-255.pbf".to_owned(), "fonts/Noto Sans Regular/0-255.pbf".to_owned())];
+        assets::pack(&sources, &links, out).unwrap();
+    }
+
+    #[test]
+    fn serves_the_styles_with_their_fonts_and_sprites() {
+        let tmp = tempfile::tempdir().unwrap();
+        let scope = [BBox { west: 1.0, south: 38.5, east: 4.6, north: 40.2 }];
+        let pmtiles = tmp.path().join("t.pmtiles");
+        fs::write(&pmtiles, archive(&[(tile_id(0, 0, 0), b"world")], 0)).unwrap();
+        let meta = tileset::convert(&pmtiles, &tmp.path().join("a/tiles"), &scope).unwrap();
+        let server = Server::new("/tiles");
+        // Without the fonts and sprites, a style cannot be painted.
+        server.load(&view(&tmp.path().join("a"), "b1", &meta)).unwrap();
+        let first = styles::catalog();
+        let first = first.0.first().zip(first.1.first()).map(|(f, l)| (f.to_string(), l.to_string()));
+        if let Some((flavor, lang)) = &first {
+            assert_eq!(get(&server, "styles/{flavor}/{lang}", &[("flavor", flavor), ("lang", &format!("{lang}.json"))], &[]).status, 503);
+        }
+
+        pack_assets(tmp.path(), &tmp.path().join("a/tiles/assets"));
+        server.load(&view(&tmp.path().join("a"), "b1", &meta)).unwrap();
+
+        let catalog: serde_json::Value = serde_json::from_slice(&get(&server, "styles.json", &[], &[]).body).unwrap();
+        assert_eq!(catalog["style"], "/tiles/styles/{flavor}/{lang}.json");
+        if let Some((flavor, lang)) = &first {
+            let r = get(&server, "styles/{flavor}/{lang}", &[("flavor", flavor), ("lang", &format!("{lang}.json"))], &[]);
+            assert_eq!((r.status, header(&r, "Content-Encoding"), header(&r, "Cache-Control")), (200, Some("gzip"), Some(REVALIDATE)));
+        }
+        let r = get(&server, "styles/{flavor}/{lang}", &[("flavor", "neon"), ("lang", "en.json")], &[]);
+        assert_eq!((r.status, header(&r, "Cache-Control")), (404, Some(REVALIDATE)));
+
+        // The first font stack of the list that there is, compressed as stored.
+        let font = |stacks: &str, query: &[(&str, &str)]| get(&server, "fonts/{fontstack}/{range}", &[("fontstack", stacks), ("range", "0-255.pbf")], query);
+        let r = font("Missing Sans,Noto Sans Medium", &[("v", "b1")]);
+        assert_eq!((r.status, r.content_type.as_str(), header(&r, "Content-Encoding"), header(&r, "Cache-Control")), (200, "application/x-protobuf", Some("gzip"), Some(IMMUTABLE)));
+        let r = font("Noto Sans Devanagari Regular v1", &[]);
+        assert_eq!((r.status, header(&r, "Cache-Control")), (200, Some(REVALIDATE)));
+        assert_eq!(r.body, font("Noto Sans Regular", &[]).body);
+        assert_eq!(font("Missing Sans", &[]).status, 404);
+
+        let r = get(&server, "sprites/{name}", &[("name", "light.png")], &[("v", "b1")]);
+        assert_eq!((r.status, r.body.as_slice(), r.content_type.as_str(), header(&r, "Content-Encoding")), (200, &b"\x89PNG"[..], "image/png", None));
+        let r = get(&server, "sprites/{name}", &[("name", "light.json")], &[("v", "old")]);
+        assert_eq!((r.status, r.content_type.as_str(), header(&r, "Cache-Control")), (200, "application/json", Some(REVALIDATE)));
+        assert_eq!(get(&server, "sprites/{name}", &[("name", "dark.png")], &[]).status, 404);
+    }
+
+    /// What the conformance suite of the SDK asks with no bundle loaded, asked of a loaded one: odd
+    /// parameters are answered, never with 500, and an error is JSON.
+    #[test]
+    fn odd_requests_to_a_loaded_bundle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pmtiles = tmp.path().join("t.pmtiles");
+        fs::write(&pmtiles, archive(&[(tile_id(0, 0, 0), b"world")], 0)).unwrap();
+        let meta = tileset::convert(&pmtiles, &tmp.path().join("a/tiles"), &[BBox { west: 1.0, south: 38.5, east: 4.6, north: 40.2 }]).unwrap();
+        pack_assets(tmp.path(), &tmp.path().join("a/tiles/assets"));
+        let server = Server::new("/tiles");
+        server.load(&view(&tmp.path().join("a"), "b1", &meta)).unwrap();
+
+        let long = "x".repeat(10_000);
+        let odd = ["", "../../etc/passwd", "99999999999999999999", "-0", "0x1", "\u{0}", "🦎", ",,,", " , ", "a/b", "%2e%2e", long.as_str()];
+        let routes: [(&str, &[&str]); 7] = [
+            ("{z}/{x}/{y}", &["z", "x", "y"]),
+            ("tilejson.json", &[]),
+            ("styles.json", &[]),
+            ("styles/{flavor}/{lang}", &["flavor", "lang"]),
+            ("fonts/{fontstack}/{range}", &["fontstack", "range"]),
+            ("sprites/{name}", &["name"]),
+            ("no/such/route", &[]),
+        ];
+        for (route, names) in routes {
+            for value in odd {
+                let params: Vec<(&str, &str)> = names.iter().map(|n| (*n, value)).collect();
+                let r = get(&server, route, &params, &[("v", value)]);
+                assert!((200..600).contains(&r.status) && r.status != 500, "{route} {value:?}: {}", r.status);
+                if r.status >= 400 {
+                    let body: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+                    assert!(r.content_type.starts_with("application/json") && body["error"].is_string(), "{route} {value:?}");
+                }
+            }
+        }
     }
 }

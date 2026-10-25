@@ -1,0 +1,3 @@
+# Frozen downloads of ES-PM that golden/baseline.json is measured on (ci/test.sh, ci/golden-snapshot.sh).
+file=golden-tiles-ES-PM-20261025.tar.gz
+sha256=b7c25940217cce0a8a42b491df96191889a020c6471f0d6781a75f70530b99dd

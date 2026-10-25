@@ -7,6 +7,8 @@ mod assets;
 mod config;
 mod extracts;
 mod geo;
+#[doc(hidden)]
+pub mod golden;
 mod inputs;
 mod pbf;
 mod pipeline;
