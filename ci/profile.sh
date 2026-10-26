@@ -22,10 +22,18 @@ commit=$(field profile planetiler/profile.toml commit)
 mkdir -p "$work" "$out"
 work=$(cd "$work" && pwd)
 src=$work/basemaps
-if [ ! -d "$src/.git" ]; then
+clone() {
+    rm -rf "$src"
     git -c core.autocrlf=false clone -q --filter=blob:none --no-checkout "$repository" "$src"
+}
+[ -d "$src/.git" ] || clone
+# A clone restored by the cache of the CI (Swatinem/rust-cache, which keeps target/) may come back
+# broken, and then the fetch fails with «not our ref»: it is cloned again.
+if ! git -C "$src" cat-file -e "$commit^{commit}" 2> /dev/null \
+    && ! git -C "$src" fetch -q origin "$commit"; then
+    clone
+    git -C "$src" cat-file -e "$commit^{commit}" 2> /dev/null || git -C "$src" fetch -q origin "$commit"
 fi
-git -C "$src" cat-file -e "$commit^{commit}" 2> /dev/null || git -C "$src" fetch -q origin "$commit"
 git -C "$src" -c core.autocrlf=false checkout -q --force "$commit"
 git -C "$src" clean -qfdx
 git -C "$src" apply --whitespace=nowarn "$PWD"/planetiler/patches/*.patch
