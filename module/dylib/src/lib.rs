@@ -1,4 +1,4 @@
-//! The tiles module as a library that geko loads (docs/MODULES_PLAN.md, `DylibModule`).
+//! The tiles module as a library that geko loads (docs/MODULES.md of the host, `DylibModule`).
 
 use geko_module_sdk::Result;
 use geko_module_sdk::module::{Context, Module};

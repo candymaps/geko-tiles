@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: geko-tiles <geko-tiles@invalid>
+Date: Sat, 24 Oct 2026 20:47:18 +0200
+Subject: [PATCH] Take an empty Natural Earth value as a missing one
+
+The shapefiles carry brk_a3 = "" where the gpkg carries null, which added an
+empty brk_a3 to the boundaries of z5.
+---
+ .../src/main/java/com/protomaps/basemap/layers/Boundaries.java  | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tiles/src/main/java/com/protomaps/basemap/layers/Boundaries.java b/tiles/src/main/java/com/protomaps/basemap/layers/Boundaries.java
+index 8a1625f..118d2c0 100644
+--- a/tiles/src/main/java/com/protomaps/basemap/layers/Boundaries.java
++++ b/tiles/src/main/java/com/protomaps/basemap/layers/Boundaries.java
+@@ -38,7 +38,7 @@ public class Boundaries implements ForwardingProfile.OsmRelationPreprocessor,
+     if (value == null) {
+       value = sf.getTag(key.toUpperCase(Locale.ROOT));
+     }
+-    return value == null ? null : value.toString();
++    return value == null || value.toString().isEmpty() ? null : value.toString();
+   }
+ 
+   public void processNe(SourceFeature sf, FeatureCollector features) {

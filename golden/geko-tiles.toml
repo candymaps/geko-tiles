@@ -1,0 +1,4 @@
+# The configuration of the tiles module for its golden (ci/test.sh --variant golden): the defaults,
+# without qrank, which is 121 MB of the whole world and the golden would have to freeze.
+[planetiler]
+qrank = false
