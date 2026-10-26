@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: geko-tiles <geko-tiles@invalid>
+Date: Sat, 24 Oct 2026 20:47:18 +0200
+Subject: [PATCH] Read the water and land polygons already cut to the scope
+
+geko-tiles keeps, of the split polygons of osmdata, the records that touch the
+scope, and leaves them as shapefiles in data/sources/.
+---
+ tiles/src/main/java/com/protomaps/basemap/Basemap.java | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/tiles/src/main/java/com/protomaps/basemap/Basemap.java b/tiles/src/main/java/com/protomaps/basemap/Basemap.java
+index ec9fa38..b10ef9d 100644
+--- a/tiles/src/main/java/com/protomaps/basemap/Basemap.java
++++ b/tiles/src/main/java/com/protomaps/basemap/Basemap.java
+@@ -306,10 +306,8 @@ public class Basemap extends ForwardingProfile {
+       // Add OSM and GeoPackage sources
+       planetiler
+         .addOsmSource("osm", Path.of("data", "sources", area + ".osm.pbf"), "geofabrik:" + area)
+-        .addShapefileSource("osm_water", sourcesDir.resolve("water-polygons-split-3857.zip"),
+-          "https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip")
+-        .addShapefileSource("osm_land", sourcesDir.resolve("land-polygons-split-3857.zip"),
+-          "https://osmdata.openstreetmap.de/download/land-polygons-split-3857.zip")
++        .addShapefileSource("osm_water", sourcesDir.resolve("water-polygons-split-3857.shp"))
++        .addShapefileSource("osm_land", sourcesDir.resolve("land-polygons-split-3857.shp"))
+         .addGeoPackageSource("landcover", sourcesDir.resolve("daylight-landcover.gpkg"),
+           "https://r2-public.protomaps.com/datasets/daylight-landcover.gpkg");
+     }

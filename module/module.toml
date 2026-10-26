@@ -1,0 +1,5 @@
+# The package of the tiles module (docs/MODULES.md of the host): the library that geko loads into its
+# process (`DylibModule`, the only adapter), from the crate in module/dylib/.
+name = "tiles"
+kind = "dylib"
+entry = "libgeko_tiles.so"

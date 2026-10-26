@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: geko-tiles <geko-tiles@invalid>
+Date: Sat, 24 Oct 2026 20:47:18 +0200
+Subject: [PATCH] Download nothing: qrank optional, pgf-encoding given
+
+Every download of geko-tiles goes through the Downloader of geko (offline
+mode, cache, licenses). Without qrank.csv.gz the profile goes on with an empty
+table; pgf-encoding.zip must be there.
+---
+ .../main/java/com/protomaps/basemap/Basemap.java    | 13 +++----------
+ .../java/com/protomaps/basemap/feature/QrankDb.java |  4 ++++
+ 2 files changed, 7 insertions(+), 10 deletions(-)
+
+diff --git a/tiles/src/main/java/com/protomaps/basemap/Basemap.java b/tiles/src/main/java/com/protomaps/basemap/Basemap.java
+index b10ef9d..c454442 100644
+--- a/tiles/src/main/java/com/protomaps/basemap/Basemap.java
++++ b/tiles/src/main/java/com/protomaps/basemap/Basemap.java
+@@ -315,18 +315,11 @@ public class Basemap extends ForwardingProfile {
+     Path pgfEncodingZip = sourcesDir.resolve("pgf-encoding.zip");
+     Path qrankCsv = sourcesDir.resolve("qrank.csv.gz");
+ 
+-    if (!Files.exists(qrankCsv)) {
+-      Downloader.create(planetiler.config())
+-        .add("qrank", "https://qrank.toolforge.org/download/qrank.csv.gz", qrankCsv)
+-        .run();
+-    }
+-
+-    var qrankDb = QrankDb.fromCsv(qrankCsv);
++    // qrank is optional: without it, places and POIs keep the zooms of their kind.
++    var qrankDb = Files.exists(qrankCsv) ? QrankDb.fromCsv(qrankCsv) : QrankDb.empty();
+ 
+     if (!Files.exists(pgfEncodingZip)) {
+-      Downloader.create(planetiler.config())
+-        .add("pgf-encoding", "https://wipfli.github.io/pgf-encoding/pgf-encoding.zip", pgfEncodingZip)
+-        .run();
++      throw new IOException("missing " + pgfEncodingZip + ": geko-tiles downloads it");
+     }
+ 
+     FontRegistry fontRegistry = FontRegistry.getInstance();
+diff --git a/tiles/src/main/java/com/protomaps/basemap/feature/QrankDb.java b/tiles/src/main/java/com/protomaps/basemap/feature/QrankDb.java
+index 5a244e2..e285b25 100644
+--- a/tiles/src/main/java/com/protomaps/basemap/feature/QrankDb.java
++++ b/tiles/src/main/java/com/protomaps/basemap/feature/QrankDb.java
+@@ -38,6 +38,10 @@ public final class QrankDb {
+     }
+   }
+ 
++  public static QrankDb empty() {
++    return new QrankDb(new LongLongHashMap());
++  }
++
+   public static QrankDb fromCsv(Path csvPath) throws IOException {
+     GZIPInputStream gzip = new GZIPInputStream(new FileInputStream(csvPath.toFile()));
+     try (BufferedReader br = new BufferedReader(new InputStreamReader(gzip))) {
