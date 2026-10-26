@@ -32,7 +32,8 @@ golden_profile() {
         return
     fi
     [ -f "$out/protomaps-basemap.jar" ] || ci/profile.sh "$out" >&2
-    echo "$out/protomaps-basemap.jar"
+    # Absolute: build.rs runs in module/, where the default target/ of the CI does not resolve.
+    echo "$(cd "$out" && pwd)/protomaps-basemap.jar"
 }
 
 # Builds the tiles of the golden in its data directory, with everything redone (the stamps only know
