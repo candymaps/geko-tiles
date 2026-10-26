@@ -1,20 +1,29 @@
-[package]
-name = "geko-module-tiles"
-version.workspace = true
-edition.workspace = true
-publish.workspace = true
-license.workspace = true
+[workspace]
+resolver = "3"
+members = ["module", "module/dylib"]
 
-# The tiles module as a process module (`ProcessModule`); the host links the library in.
-[[bin]]
-name = "geko-tiles"
-path = "src/main.rs"
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0-only"
 
-[dependencies]
-geko-module-sdk.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
+[workspace.dependencies]
+# The contract, from the repository of the host (docs/MODULES.md there), at its tag sdk-<contract>.
+geko-module-sdk = { git = "https://github.com/candymaps/geko.git", tag = "sdk-1" }
+# The Downloader of the host (PROJECT.md §7.2 there), the same as the geocoder's.
+geko-fetch = { git = "https://github.com/candymaps/geko.git", tag = "sdk-1" }
+geko-module-tiles = { path = "module" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-[dev-dependencies]
-geko-module-sdk = { workspace = true, features = ["conformance"] }
-tempfile = "3"
+[profile.release]
+lto = "fat"
+codegen-units = 1
+# Unwind, not abort: a bug in one request must never take the whole server down.
+panic = "unwind"
+
+[profile.ci]
+inherits = "release"
+lto = "thin"
+codegen-units = 16

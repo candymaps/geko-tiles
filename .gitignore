@@ -1,10 +1,2 @@
 /target/
-/data/
-/bundles/
-*.pbf
-*.parquet
-*.duckdb
-*.duckdb.wal
-*.pmtiles
 .DS_Store
-/.geko-golden/

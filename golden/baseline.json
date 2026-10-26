@@ -1,0 +1,104 @@
+{
+  "assets": {
+    "count": 1045,
+    "data_sha256": "d27281d46cffc37de37b9d4767d4e1afcb7a52061594f9b1d7e0f7678e1ad066",
+    "index_sha256": "ba079c43b02ee2f9945f707663e4833c87a7a7d7b1ada0229b724b28069b52fb"
+  },
+  "metadata_sha256": "255dd1119864a974d03fabb0c9cdfe73d504e7544a27ba454c9c6f1ac959ade8",
+  "tiles": {
+    "contents": 6910,
+    "count": 43116,
+    "places": {
+      "Eivissa 10/516/391": "01774b525d59f8830d3aced1136890d468d1e01a99499e0312f7a573e9be5d1d",
+      "Eivissa 12/2064/1566": "0dbaccac8fcfa77d51b5aa4ab0c69aaa5a876459e7973b89e020a44ef5c6ded3",
+      "Eivissa 14/8257/6266": "7e52f95d03b998200efee5f919a2fd39ba98466992ab398f3cec1067c68b1088",
+      "Formentera 10/516/392": "b78442209dc8869c13005a94dd2b98c8949ac8b46aed3eed1ded268163eb2b73",
+      "Formentera 12/2064/1569": "8d030ab0dea180cbd91ab805aecb36bb4d67d64484c5e12fd293e31d55e924d1",
+      "Formentera 14/8257/6279": "9ac3460215dccb1e1889240af6fb14d86fd46c39f1a9b3c0238eaad9d21bc061",
+      "Formentera 8/129/98": "b8d1f2ce324457348305066bba3cfdb4cf3dcc866d2fb84c66d0209cd8d77d40",
+      "Mao 10/524/388": "35ff55bbb953c40e3250623f2374c1d73791d59638a03d3ed561811a531a62a7",
+      "Mao 12/2096/1552": "d3b1514b7aa12e1692f87df1a6676156da68d387b61580c82419f5c4f08e3d13",
+      "Mao 14/8386/6209": "605db9cc402ef1afa35a4ccae7ac1af9a940df499d9c5899d7ac68fadb407436",
+      "Mao 8/131/97": "d49074f41d7d4c9b85f4d81e88476a2afb3189a11a3833e55dd2edc37861a278",
+      "Palma 10/519/389": "4db1b94525db579547a78579ea998884241a9ddc8e3d6256be1cfec9150b2db9",
+      "Palma 12/2078/1557": "9c2dd6c2df0a8e1014fbc8888b75a6313b671a4cea3dd5d95b5708dc44cb999c",
+      "Palma 14/8312/6228": "bb97f5acd87a77e7d965bc64d519faf9ba733707d2848d17f5cc2259f7f62a58",
+      "Tramuntana 10/519/388": "e2caad7431fab4f06cc12ed266e4265c20e11cf2c818eae61e4e8d0d2fe106e7",
+      "Tramuntana 12/2079/1553": "36c3fbccc478df7a6dfaf4276490e562a85fe867b061c683880435371877df83",
+      "Tramuntana 14/8318/6214": "995cb053525adb1e674f6f5da8736cf20778ec4c89e12ca30c31461bffcc7dd0",
+      "Tramuntana 8/129/97": "dc169e1010f5f660c184e0b2e97f38c6db56a324bedfc478ce6e4487416f5cea",
+      "sea 0/0/0": "42084d5b058254e460d218219fd94842c3caee46d879a3e04596ef710562a814",
+      "sea 10/521/392": "72fa58110c22a7a42c8a28c1dd5169c6b70cc19fba3f5b12dc9548eba7018950",
+      "sea 12/2085/1568": "72fa58110c22a7a42c8a28c1dd5169c6b70cc19fba3f5b12dc9548eba7018950",
+      "sea 14/8342/6273": "ab16ac5b5438aae8f9ad514f2d82537de1bedd000410f3a93fdd456212eb06e4",
+      "sea 2/2/1": "9e9cf01baa6faf4a192cb0990c32274dfedfbb3791da987f2c0a14d1f982f9ae",
+      "sea 4/8/6": "6d58b5dc500b358ddaeb278ef0e17298e54ec2beec027b166483215e76f5d68b",
+      "sea 6/32/24": "8a8346e2e006d16f3317b6258c2e5fc132d0b0a76688b2aa8b65d10075f54edb",
+      "sea 8/130/98": "72fa58110c22a7a42c8a28c1dd5169c6b70cc19fba3f5b12dc9548eba7018950"
+    },
+    "sha256": "3a1449afcc3f3bcb9a502cf11981dc9529378b11ae8bf93ef87b6ec074502bf5",
+    "stored_bytes": 31221036,
+    "zooms": {
+      "z00": {
+        "bytes": 64307,
+        "tiles": 1
+      },
+      "z01": {
+        "bytes": 157402,
+        "tiles": 4
+      },
+      "z02": {
+        "bytes": 364309,
+        "tiles": 16
+      },
+      "z03": {
+        "bytes": 806470,
+        "tiles": 64
+      },
+      "z04": {
+        "bytes": 1606898,
+        "tiles": 256
+      },
+      "z05": {
+        "bytes": 3397461,
+        "tiles": 1024
+      },
+      "z06": {
+        "bytes": 8112,
+        "tiles": 1
+      },
+      "z07": {
+        "bytes": 34382,
+        "tiles": 4
+      },
+      "z08": {
+        "bytes": 98239,
+        "tiles": 12
+      },
+      "z09": {
+        "bytes": 264032,
+        "tiles": 48
+      },
+      "z10": {
+        "bytes": 569004,
+        "tiles": 140
+      },
+      "z11": {
+        "bytes": 1211363,
+        "tiles": 520
+      },
+      "z12": {
+        "bytes": 3677320,
+        "tiles": 2040
+      },
+      "z13": {
+        "bytes": 7111065,
+        "tiles": 7900
+      },
+      "z14": {
+        "bytes": 15307358,
+        "tiles": 31086
+      }
+    }
+  }
+}

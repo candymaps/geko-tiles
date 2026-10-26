@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: geko-tiles <geko-tiles@invalid>
+Date: Sat, 24 Oct 2026 20:47:18 +0200
+Subject: [PATCH] Read Natural Earth as the shapefiles of its layers, in
+ data/sources/ne/
+
+geko-tiles downloads only the 11 layers the profile uses instead of the whole
+gpkg (446 MB), which Planetiler reads with one thread (71 s against 6 s with
+Baleares). Planetiler runs with --bounds=world: its shapefile reader drops what
+does not touch the bounds.
+---
+ tiles/src/main/java/com/protomaps/basemap/Basemap.java | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/tiles/src/main/java/com/protomaps/basemap/Basemap.java b/tiles/src/main/java/com/protomaps/basemap/Basemap.java
+index 470bc3a..ec9fa38 100644
+--- a/tiles/src/main/java/com/protomaps/basemap/Basemap.java
++++ b/tiles/src/main/java/com/protomaps/basemap/Basemap.java
+@@ -285,8 +285,7 @@ public class Basemap extends ForwardingProfile {
+     }
+ 
+     var planetiler = Planetiler.create(args)
+-      .addGeoPackageSource("ne", sourcesDir.resolve("natural_earth_vector.gpkg.zip"),
+-        "https://naciscdn.org/naturalearth/packages/natural_earth_vector.gpkg.zip");
++      .addShapefileGlobSource("ne", sourcesDir.resolve("ne"), "*.shp");
+ 
+     if (!overtureFile.isEmpty()) {
+       Path base = args.inputFile("overture", "overture base directory", Path.of("data", "overture"));
