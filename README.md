@@ -1,8 +1,8 @@
 <p align="center">
   <img height="100" src="https://placehold.co/170x30/transparent/A4CC47?text=Geko+Tiles&font=raleway" alt="geko-tiles">
 </p>
-<h3 align="center">The vector tiles module of geko: a map of your scope, served by geko alone.</h3>
-<p align="center">It builds vector tiles from OpenStreetMap and Natural Earth for the countries of geko.toml, and serves them without decoding a single byte.</p>
+<h3 align="center">The vector tiles module of geko.</h3>
+<p align="center">A map of your scope, served by geko alone.</p>
 <p align="center">
   <a href="https://github.com/candymaps/geko-tiles/releases/latest"><img src="https://img.shields.io/github/v/release/candymaps/geko-tiles?label=version&color=blue&style=plastic" alt="Version"></a>
   <a href="https://www.gnu.org/licenses/agpl-3.0"><img src="https://img.shields.io/badge/license-AGPL--3.0-orange?style=plastic" alt="License"></a>
