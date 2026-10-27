@@ -109,6 +109,11 @@ impl Assets {
     pub fn len(&self) -> usize {
         self.index.len()
     }
+
+    /// The paths of every asset, in no order.
+    pub fn paths(&self) -> impl Iterator<Item = &str> {
+        self.index.keys().map(String::as_str)
+    }
 }
 
 /// The media type of an asset, by its extension.
