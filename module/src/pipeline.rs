@@ -168,6 +168,12 @@ fn licenses(qrank: bool) -> Vec<LicenseNotice> {
     list
 }
 
+/// The sources whose licenses tiles declares: the ones of the bundle manifest that are its own, since
+/// the manifest also carries those of the other modules.
+pub fn license_sources() -> Vec<String> {
+    licenses(true).into_iter().map(|l| l.source).collect()
+}
+
 /// The Geofabrik index, downloaded as the geocoder downloads it.
 fn catalog(setup: &Setup, dl: &dyn Downloader) -> Result<Catalog> {
     let path = setup.osm_dir().join(extracts::INDEX_FILE);

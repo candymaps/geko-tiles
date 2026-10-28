@@ -90,7 +90,14 @@ impl Server {
         let meta: Meta = serde_json::from_value(view.module.meta.clone()).map_err(|e| GekoError::Data(format!("bundle {}: the meta of tiles: {e}", view.manifest.version)))?;
         let mut loaded = open(&view.root.join("tiles"), &meta, &view.manifest.version, &self.url)?;
         loaded.created_unix = view.manifest.created_unix;
-        loaded.sources = view.manifest.licenses.iter().map(|l| json!({ "id": l.source, "name": l.name, "attribution": l.attribution, "url": l.url })).collect();
+        let own = crate::pipeline::license_sources();
+        loaded.sources = view
+            .manifest
+            .licenses
+            .iter()
+            .filter(|l| own.contains(&l.source))
+            .map(|l| json!({ "id": l.source, "name": l.name, "attribution": l.attribution, "url": l.url }))
+            .collect();
         tracing::info!(bundle = %loaded.version, tiles = loaded.ids.len(), assets = loaded.assets.as_ref().map_or(0, Assets::len), "tiles loaded");
         self.loaded.store(Some(Arc::new(loaded)));
         Ok(())
