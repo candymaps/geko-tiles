@@ -31,7 +31,7 @@ pub const NAME: &str = "tiles";
 
 pub fn open(context: Context) -> Result<Box<dyn Module>> {
     let config = config::Config::parse(&context.config, &context.config_file)?;
-    let server = serve::Server::new(&config.url).with_settings(settings(&config));
+    let server = serve::Server::new(&config.url).with_settings(settings(&config)).with_data_dir(context.data_dir.clone());
     Ok(Box::new(TilesModule { setup: Setup { config, scope: context.scope, data_dir: context.data_dir, data: context.data }, server }))
 }
 

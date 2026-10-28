@@ -67,6 +67,8 @@ pub struct Server {
     stats: Stats,
     /// The options of `geko-tiles.toml`, as `status.json` shows them.
     settings: serde_json::Value,
+    /// The data directory of the host, where the build leaves the stages of its last run.
+    data_dir: std::path::PathBuf,
 }
 
 impl Server {
@@ -77,11 +79,17 @@ impl Server {
             counters: Counters::default(),
             stats: Stats::default(),
             settings: serde_json::Value::Null,
+            data_dir: std::path::PathBuf::new(),
         }
     }
 
     pub fn with_settings(mut self, settings: serde_json::Value) -> Self {
         self.settings = settings;
+        self
+    }
+
+    pub fn with_data_dir(mut self, dir: std::path::PathBuf) -> Self {
+        self.data_dir = dir;
         self
     }
 
@@ -184,6 +192,7 @@ impl Server {
             },
             "sources": l.sources,
             "settings": self.settings,
+            "last_build": crate::pipeline::last_build(&self.data_dir),
         })
     }
 
