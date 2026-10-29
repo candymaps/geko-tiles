@@ -20,6 +20,8 @@ What it serves, under `/tiles/`:
 - **A TileJSON** (`/tiles/tilejson.json`) with the attribution, the layers, the bounds of the scope and versioned tile URLs (`?v=<bundle>`): those tiles are cached forever by clients and CDNs, and a new bundle changes the URLs.
 - **Styles** (`/tiles/styles/{flavor}/{lang}.json`, listed at `/tiles/styles.json`): those of Protomaps, in 5 flavors (`light`, `dark`, `white`, `grayscale`, `black`) and 41 languages, with their **fonts** (`/tiles/fonts/…`) and **sprites** (`/tiles/sprites/…`). They are data: any other MapLibre style can paint the tiles, pointing to `tilejson.json`, and the server never knows which one.
 
+- **Status and statistics** (`/tiles/status.json`, `/tiles/stats.json`): the bundle loaded, its tiles, layers, styles and sources and the options in effect; and, since the module started, the requests, errors and time of every route, the tiles of each zoom level, the last hour minute by minute and the styles asked for. They feed the dashboard of geko.
+
 On top of the same foundation as the rest of geko:
 
 - **Fully automatic:** it downloads what the scope of `geko.toml` needs (the OSM extracts, the Natural Earth layers it uses, the water and land polygons, cut to the scope on the machine), builds the tiles and keeps them up to date.
