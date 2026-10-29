@@ -53,6 +53,20 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - if: steps.affected.outputs.code == '1'
         run: ci/test.sh
+      # What merging the pull request changes of the host it builds against, for pr-comment.yml to
+      # warn of it, whether or not the checks ran: `contract` (the `sdk-<contract>` tag of the SDK in
+      # Cargo.toml) and `sdk` (that dependency, in Cargo.toml or in what Cargo.lock locks).
+      - id: warnings
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          pin() { git show "$1:Cargo.toml" | grep '^geko-module-sdk' || true; }
+          locked() { git show "$1:Cargo.lock" | grep -A3 '^name = "geko-module-sdk"' | grep '^source' || true; }
+          tag() { pin "$1" | sed -n 's/.*tag = "sdk-\([0-9]*\)".*/\1/p'; }
+          warnings=
+          [ "$(tag HEAD^1)" = "$(tag HEAD)" ] || warnings="$warnings contract"
+          [ "$(pin HEAD^1)$(locked HEAD^1)" = "$(pin HEAD)$(locked HEAD)" ] || warnings="$warnings sdk"
+          echo "warnings=${warnings# }" >> "$GITHUB_OUTPUT"
+          echo "warnings: ${warnings:-none}"
       - if: always() && github.event_name == 'pull_request'
         run: |
           result=failure
@@ -61,8 +75,8 @@ jobs:
             [ "${{ steps.affected.outputs.code }}" = 1 ] && result=passed
           fi
           echo "checks: $result"
-          printf '{"number": %s, "head": "%s", "result": "%s"}\n' \
-            "${{ github.event.pull_request.number }}" "${{ github.event.pull_request.head.sha }}" "$result" > pr.json
+          printf '{"number": %s, "head": "%s", "result": "%s", "warnings": "%s"}\n' \
+            "${{ github.event.pull_request.number }}" "${{ github.event.pull_request.head.sha }}" "$result" "${{ steps.warnings.outputs.warnings }}" > pr.json
       - if: always() && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:

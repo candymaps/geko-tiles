@@ -15,6 +15,7 @@ mod pipeline;
 mod planetiler;
 mod pmtiles;
 mod serve;
+mod stats;
 mod shapefile;
 mod styles;
 mod tileset;
@@ -30,8 +31,26 @@ pub const NAME: &str = "tiles";
 
 pub fn open(context: Context) -> Result<Box<dyn Module>> {
     let config = config::Config::parse(&context.config, &context.config_file)?;
-    let server = serve::Server::new(&config.url);
+    let server = serve::Server::new(&config.url).with_settings(settings(&config)).with_data_dir(context.data_dir.clone());
     Ok(Box::new(TilesModule { setup: Setup { config, scope: context.scope, data_dir: context.data_dir, data: context.data }, server }))
+}
+
+/// Every option of `geko-tiles.toml` with the value it has and the one it would have without a file,
+/// and when a change of it takes effect.
+fn settings(config: &config::Config) -> serde_json::Value {
+    let d = config::Config::default();
+    let setting = |key: &str, value: serde_json::Value, default: serde_json::Value, apply: &str| {
+        serde_json::json!({ "key": key, "value": value, "default": default, "apply": apply })
+    };
+    serde_json::Value::Array(vec![
+        setting("format", config.format.as_str().into(), d.format.as_str().into(), "rebuild"),
+        setting("url", config.url.clone().into(), d.url.into(), "restart"),
+        setting("osm.mirror", config.osm.mirror.clone().into(), d.osm.mirror.into(), "rebuild"),
+        setting("planetiler.memory", config.planetiler.memory.clone().into(), d.planetiler.memory.into(), "rebuild"),
+        setting("planetiler.threads", config.planetiler.threads.into(), d.planetiler.threads.into(), "rebuild"),
+        setting("planetiler.storage", config.planetiler.storage.as_str().into(), d.planetiler.storage.as_str().into(), "rebuild"),
+        setting("planetiler.qrank", config.planetiler.qrank.into(), d.planetiler.qrank.into(), "rebuild"),
+    ])
 }
 
 pub struct TilesModule {
@@ -53,6 +72,8 @@ impl Module for TilesModule {
                 route("styles/{flavor}/{lang}"),
                 route("fonts/{fontstack}/{range}"),
                 route("sprites/{name}"),
+                route("status.json"),
+                route("stats.json"),
             ],
             openapi: None,
             attribution: Some(serde_json::json!({

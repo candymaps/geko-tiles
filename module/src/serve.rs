@@ -8,6 +8,7 @@ use std::fs::{self, File};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use arc_swap::ArcSwapOption;
 use geko_module_sdk::module::{BundleView, Request, Response};
@@ -16,6 +17,7 @@ use memmap2::Mmap;
 use serde_json::json;
 
 use crate::pmtiles::tile_id;
+use crate::stats::Stats;
 use crate::styles::{self, Assets, Styles, Urls};
 use crate::tileset::{self, Meta};
 
@@ -31,6 +33,10 @@ const ATTRIBUTION: &str = r#"<a href="https://github.com/protomaps/basemaps">Pro
 struct Loaded {
     /// The id of the bundle, in the URLs of `tilejson.json`.
     version: String,
+    created_unix: u64,
+    /// The sources of the bundle, as the manifest declares them.
+    sources: serde_json::Value,
+    meta: Meta,
     /// The ids of the tiles, sorted, and where each one is (`offset << LEN_BITS | len`).
     ids: Vec<u64>,
     places: Vec<u64>,
@@ -58,17 +64,48 @@ pub struct Server {
     url: String,
     loaded: ArcSwapOption<Loaded>,
     counters: Counters,
+    stats: Stats,
+    /// The options of `geko-tiles.toml`, as `status.json` shows them.
+    settings: serde_json::Value,
+    /// The data directory of the host, where the build leaves the stages of its last run.
+    data_dir: std::path::PathBuf,
 }
 
 impl Server {
     pub fn new(url: &str) -> Self {
-        Self { url: url.trim_end_matches('/').to_owned(), loaded: ArcSwapOption::empty(), counters: Counters::default() }
+        Self {
+            url: url.trim_end_matches('/').to_owned(),
+            loaded: ArcSwapOption::empty(),
+            counters: Counters::default(),
+            stats: Stats::default(),
+            settings: serde_json::Value::Null,
+            data_dir: std::path::PathBuf::new(),
+        }
+    }
+
+    pub fn with_settings(mut self, settings: serde_json::Value) -> Self {
+        self.settings = settings;
+        self
+    }
+
+    pub fn with_data_dir(mut self, dir: std::path::PathBuf) -> Self {
+        self.data_dir = dir;
+        self
     }
 
     /// Loads the part of `view`; the bundle in use, if any, stays until it has loaded.
     pub fn load(&self, view: &BundleView) -> Result<()> {
         let meta: Meta = serde_json::from_value(view.module.meta.clone()).map_err(|e| GekoError::Data(format!("bundle {}: the meta of tiles: {e}", view.manifest.version)))?;
-        let loaded = open(&view.root.join("tiles"), &meta, &view.manifest.version, &self.url)?;
+        let mut loaded = open(&view.root.join("tiles"), &meta, &view.manifest.version, &self.url)?;
+        loaded.created_unix = view.manifest.created_unix;
+        let own = crate::pipeline::license_sources();
+        loaded.sources = view
+            .manifest
+            .licenses
+            .iter()
+            .filter(|l| own.contains(&l.source))
+            .map(|l| json!({ "id": l.source, "name": l.name, "attribution": l.attribution, "url": l.url }))
+            .collect();
         tracing::info!(bundle = %loaded.version, tiles = loaded.ids.len(), assets = loaded.assets.as_ref().map_or(0, Assets::len), "tiles loaded");
         self.loaded.store(Some(Arc::new(loaded)));
         Ok(())
@@ -80,7 +117,13 @@ impl Server {
 
     /// Answers the routes that `describe` declares.
     pub fn handle(&self, request: &Request) -> Response {
+        let started = Instant::now();
         let loaded = self.loaded.load();
+        match request.route.as_str() {
+            "status.json" => return self.json(self.status(&loaded)),
+            "stats.json" => return self.json(self.stats.snapshot()),
+            _ => {}
+        }
         let param = |name: &str| request.params.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str()).unwrap_or_default();
         let response = match (&*loaded, request.route.as_str()) {
             (None, _) => Response::error(503, "no tiles bundle loaded"),
@@ -98,11 +141,59 @@ impl Server {
             (Some(l), "sprites/{name}") => asset(l, Some(&format!("sprites/{}", param("name"))), request),
             (Some(_), other) => Response::error(404, &format!("no route {other}")),
         };
+        self.stats.record(&request.route, response.status, started.elapsed().as_micros() as u64);
         if response.status >= 400 {
             self.counters.errors.fetch_add(1, Ordering::Relaxed);
             return response.with_header("Cache-Control", REVALIDATE);
         }
         response
+    }
+
+    fn json(&self, body: serde_json::Value) -> Response {
+        Response::new(200, "application/json", serde_json::to_vec(&body).expect("JSON values serialize")).with_header("Cache-Control", REVALIDATE)
+    }
+
+    /// What is loaded and how it is set up, for the dashboard: the bundle, its tiles, the styles
+    /// and assets, the sources and every option of `geko-tiles.toml`.
+    fn status(&self, loaded: &Option<Arc<Loaded>>) -> serde_json::Value {
+        let Some(l) = loaded else {
+            return json!({ "ready": false, "bundle": null, "tiles": null, "styles": null, "sources": null, "settings": self.settings });
+        };
+        let tilejson: serde_json::Value = serde_json::from_slice(&l.tilejson).unwrap_or_default();
+        let layers: Vec<&str> = tilejson["vector_layers"].as_array().map(|a| a.iter().filter_map(|v| v["id"].as_str()).collect()).unwrap_or_default();
+        let (flavors, languages) = styles::catalog();
+        let paths = || l.assets.iter().flat_map(Assets::paths);
+        let mut fonts: Vec<&str> = paths().filter_map(|p| p.strip_prefix("fonts/")?.split('/').next()).collect();
+        fonts.sort_unstable();
+        fonts.dedup();
+        json!({
+            "ready": true,
+            "bundle": { "version": l.version, "created_unix": l.created_unix },
+            "tiles": {
+                "count": l.ids.len(),
+                "distinct": l.meta.contents,
+                "data_bytes": l.tiles.len(),
+                "index_bytes": 16 * l.ids.len(),
+                "format": l.tile_type,
+                "compression": l.meta.compression,
+                "min_zoom": l.meta.min_zoom,
+                "max_zoom": l.max_zoom,
+                "description": tilejson["description"],
+                "attribution": tilejson["attribution"],
+                "bounds": tilejson["bounds"],
+                "center": tilejson["center"],
+                "layers": layers,
+            },
+            "styles": {
+                "flavors": flavors,
+                "languages": languages.len(),
+                "fonts": fonts,
+                "sprites": paths().filter(|p| p.starts_with("sprites/") && p.ends_with(".json")).count(),
+            },
+            "sources": l.sources,
+            "settings": self.settings,
+            "last_build": crate::pipeline::last_build(&self.data_dir),
+        })
     }
 
     fn tile(&self, l: &Loaded, request: &Request) -> Response {
@@ -118,6 +209,7 @@ impl Server {
         let cache = if current { IMMUTABLE } else { REVALIDATE };
         let Ok(i) = l.ids.binary_search(&tile_id(z, x, y)) else {
             self.counters.empty.fetch_add(1, Ordering::Relaxed);
+            self.stats.tile(z, 0);
             return Response::new(204, l.content_type, Vec::new()).with_header("Cache-Control", cache);
         };
         let place = l.places[i];
@@ -125,6 +217,7 @@ impl Server {
         let body = l.tiles[offset..offset + len].to_vec();
         self.counters.tiles.fetch_add(1, Ordering::Relaxed);
         self.counters.bytes.fetch_add(len as u64, Ordering::Relaxed);
+        self.stats.tile(z, len);
         let response = Response::new(200, l.content_type, body).with_header("Cache-Control", cache);
         if l.gzip { response.with_header("Content-Encoding", "gzip") } else { response }
     }
@@ -144,6 +237,7 @@ impl Server {
         if l.assets.is_none() {
             return Response::error(503, "this bundle has no fonts or sprites: build it again");
         }
+        self.stats.style(flavor, lang);
         let body = l.styles.get(i, &Urls { url: &self.url, version: &l.version, tile_type: &l.tile_type }).to_vec();
         Response::new(200, "application/json", body).with_header("Content-Encoding", "gzip").with_header("Cache-Control", REVALIDATE)
     }
@@ -230,6 +324,9 @@ fn open(dir: &Path, meta: &Meta, version: &str, url: &str) -> Result<Loaded> {
         max_zoom: meta.max_zoom,
         tilejson: tilejson(meta, &metadata, version, url),
         tile_type: meta.tile_type.clone(),
+        created_unix: 0,
+        sources: serde_json::Value::Null,
+        meta: meta.clone(),
         styles: Styles::default(),
         assets,
     })
@@ -300,6 +397,8 @@ mod tests {
 
         let server = Server::new("https://cdn.example.com/tiles/");
         assert_eq!(get(&server, "{z}/{x}/{y}", &[("z", "0"), ("x", "0"), ("y", "0")], &[]).status, 503);
+        let before: serde_json::Value = serde_json::from_slice(&get(&server, "status.json", &[], &[]).body).unwrap();
+        assert_eq!((before["ready"].as_bool(), before["bundle"].is_null()), (Some(false), true));
         server.load(&view(&tmp.path().join("a"), "b1", &meta)).unwrap();
 
         let (x, y) = (x0.to_string(), y0.to_string());
@@ -321,6 +420,13 @@ mod tests {
         assert_eq!(tilejson["tiles"][0], "https://cdn.example.com/tiles/{z}/{x}/{y}?v=b1");
         assert_eq!((tilejson["minzoom"].as_u64(), tilejson["maxzoom"].as_u64()), (Some(0), Some(14)));
         assert_eq!(tilejson["bounds"], json!([1.0, 38.5, 4.6, 40.2]));
+
+        let status: serde_json::Value = serde_json::from_slice(&get(&server, "status.json", &[], &[]).body).unwrap();
+        assert_eq!((status["ready"].as_bool(), status["tiles"]["count"].as_u64(), status["tiles"]["max_zoom"].as_u64()), (Some(true), Some(3), Some(14)));
+        assert_eq!(status["bundle"]["version"], "b1");
+        let stats: serde_json::Value = serde_json::from_slice(&get(&server, "stats.json", &[], &[]).body).unwrap();
+        let zooms: Vec<(u64, u64, u64)> = stats["zooms"].as_array().unwrap().iter().map(|z| (z["zoom"].as_u64().unwrap(), z["tiles"].as_u64().unwrap(), z["empty"].as_u64().unwrap())).collect();
+        assert_eq!(zooms, [(0, 1, 0), (14, 1, 1)]);
 
         let mut metrics = String::new();
         server.metrics(&mut metrics);
