@@ -6,6 +6,11 @@
 #   ci/modules.sh build <folder>     compiles the module into <folder>/<module>/
 #   ci/modules.sh publish <folder>   signs the packages of <folder> and pushes them to
 #                                    $GEKO_MODULES_REGISTRY/geko-<module>
+#   ci/modules.sh image <folder>     makes the image of the operator mode from the package of
+#                                    <folder> (ci/image.Dockerfile, on $GEKO_HOST_IMAGE, by default
+#                                    the newest image of geko) and checks that it loads the module
+#   ci/modules.sh push-image <folder>  pushes that image to $GEKO_MODULES_REGISTRY/geko-<module>,
+#                                    with the tag <version> and, with GEKO_RELEASE=1, also latest
 #
 # The version of the module is that of Cargo.toml, followed by the commit (<version>-<commit>) unless
 # GEKO_RELEASE=1; it is compiled into the module (GEKO_MODULE_VERSION), which says it to the host
@@ -105,8 +110,44 @@ publish() {
     done
 }
 
+# The image shares its repository with the package, whose tags all end in the platform: geko asks
+# for those by name, so <version> and latest never reach it.
+image_ref() {
+    local name
+    name=$(field name module/module.toml)
+    echo "$registry/geko-$name:$(field version "$1/$name/module.toml")"
+}
+
+image() {
+    local out=$1 ref name config
+    ref=$(image_ref "$out")
+    name=$(field name module/module.toml)
+    docker build --file ci/image.Dockerfile --build-arg "HOST=${GEKO_HOST_IMAGE:-ghcr.io/candymaps/geko:latest}" \
+        --build-arg "VERSION=${ref##*:}" --build-arg "REVISION=$(git rev-parse --short HEAD)" --tag "$ref" "$out"
+    # geko refuses a module of another contract or platform, here and not in the pods of a cluster.
+    # The image carries no configuration, and geko stops without one: an empty scope downloads nothing.
+    config=$(mktemp)
+    chmod 644 "$config"
+    docker run --rm -v "$config:/etc/geko/geko.toml:ro" "$ref" --modules "$name" plan \
+        || { rm -f "$config"; echo "$ref does not load its module" >&2; return 1; }
+    rm -f "$config"
+    echo "built $ref"
+}
+
+push_image() {
+    local ref
+    ref=$(image_ref "$1")
+    docker push "$ref"
+    if [ "${GEKO_RELEASE:-0}" = 1 ]; then
+        docker tag "$ref" "${ref%:*}:latest"
+        docker push "${ref%:*}:latest"
+    fi
+}
+
 case "${1:-}" in
     build) shift; build "${1:?usage: ci/modules.sh build <folder>}" ;;
     publish) shift; publish "${1:?usage: ci/modules.sh publish <folder>}" ;;
-    *) echo "usage: ci/modules.sh build <folder> | publish <folder>" >&2; exit 2 ;;
+    image) shift; image "${1:?usage: ci/modules.sh image <folder>}" ;;
+    push-image) shift; push_image "${1:?usage: ci/modules.sh push-image <folder>}" ;;
+    *) echo "usage: ci/modules.sh build <folder> | publish <folder> | image <folder> | push-image <folder>" >&2; exit 2 ;;
 esac
