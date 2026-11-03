@@ -104,8 +104,8 @@ jobs:
         run: ci/modules.sh publish target/modules
         env:
           GEKO_PACK_SIGNING_KEY: ${{ secrets.GEKO_PACK_SIGNING_KEY }}
-      # The image of the operator mode, from the package just signed. A change of the host does not
-      # make a new one: the next push of this module does («Una imagen por módulo», in the host).
+      # The image of the operator mode, from the package just signed. A change of the host alone
+      # makes a new one through refresh-image.yml.
       - if: steps.version.outputs.module == '1'
         uses: docker/login-action@v3
         with:
