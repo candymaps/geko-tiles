@@ -1,6 +1,6 @@
 # tiles: plan
 
-Estado: publicado (`0.1.0`, 2026-10-26; pasos 1 a 8 hechos); queda el paso 9, según las medidas. El módulo cumple el contrato de geko (`contract-1`, [docs/MODULES.md del host](https://github.com/candymaps/geko/blob/main/docs/MODULES.md)) y pasa su suite de conformidad: descarga lo que necesita el ámbito, genera las teselas con Planetiler, deja su parte del bundle y la sirve en `/tiles/{z}/{x}/{y}` y `/tiles/tilejson.json`, con los estilos de Protomaps, sus fuentes y sus sprites. `publish.yml` lo publica en `ghcr.io/candymaps/geko-tiles`, y el host lo lista en `ci/modules` y lo activa por defecto, como el geocoder (`tiles = false` en `geko.toml` lo desactiva).
+Estado: publicado (`0.2.0`; `0.1.0` el 2026-10-26; pasos 1 a 8 hechos); lo que queda está en «Lo que falta». El módulo cumple el contrato de geko (`contract-1`, [docs/MODULES.md del host](https://github.com/candymaps/geko/blob/main/docs/MODULES.md)) y pasa su suite de conformidad: descarga lo que necesita el ámbito, genera las teselas con Planetiler, deja su parte del bundle y la sirve en `/tiles/{z}/{x}/{y}` y `/tiles/tilejson.json`, con los estilos de Protomaps, sus fuentes y sus sprites, y su estado y estadísticas para el panel en `/tiles/status.json` y `/tiles/stats.json` (`0.2.0`). `publish.yml` lo publica en `ghcr.io/candymaps/geko-tiles`, y el host lo lista en `ci/modules` y lo activa por defecto, como el geocoder (`tiles = false` en `geko.toml` lo desactiva).
 
 ## Objetivo
 
@@ -20,7 +20,7 @@ Fuera, por ahora: teselas ráster, relieve, actualización por minuto (se regene
 [Planetiler](https://github.com/onthegomap/planetiler) (Java, Apache-2.0) genera las teselas; el servicio es Rust puro. La JVM no entra en la imagen del host ni en el proceso de geko:
 
 - **Sin paquete propio de Planetiler (2026-10-24):** el módulo baja con el `Downloader` del host, de su origen y con el sha256 fijado en el código, el `planetiler.jar` oficial de la release de Planetiler (0.10.2, 93 MB, con todas sus dependencias) y el JRE de Temurin para su plataforma (Adoptium; Java 21, el que pide Planetiler 0.10.2; las versiones nuevas piden Java 25). El perfil de Protomaps, con nuestros parches, es un jar de 375 KB que solo depende de `planetiler-core`: lo compila la CI de este repositorio y va dentro de la propia librería del módulo (`module/build.rs`, con `GEKO_TILES_PROFILE`), que ya se publica firmada: así el módulo no tiene que buscar la carpeta de su paquete. El build lo escribe junto al JRE. En `build` se lanza como subproceso: `java -cp planetiler.jar:protomaps-basemap.jar com.protomaps.basemap.Basemap …`. Comprobado con La Rioja: las mismas teselas, byte a byte, que con el jar del perfil con dependencias; solo cambia la fecha de compilación de Planetiler en los metadatos. El lanzador de un solo fichero de Planetiler se descarta: es experimental y no fija nuestra versión del runtime.
-- **Lo que necesita del sistema (2026-10-24): `libfontconfig1`.** El perfil lee las fuentes de pgf-encoding con `java.awt.Font`, y el JRE de Temurin, aun en modo *headless* (`-Djava.awt.headless=true`, que evita las librerías de X11), necesita el fontconfig del sistema: sin él, «Problem reading font data». En `debian:bookworm-slim`, la base de la imagen de geko, basta `libfontconfig1` (unos 1,5 MB con `libfreetype6`). **Pendiente en el host:** añadirlo a la imagen (`Dockerfile`, etapa `base`). Si falta, el build lo dice.
+- **Lo que necesita del sistema (2026-10-24): `libfontconfig1`.** El perfil lee las fuentes de pgf-encoding con `java.awt.Font`, y el JRE de Temurin, aun en modo *headless* (`-Djava.awt.headless=true`, que evita las librerías de X11), necesita el fontconfig del sistema: sin él, «Problem reading font data». En `debian:bookworm-slim`, la base de la imagen de geko, basta `libfontconfig1` (unos 1,5 MB con `libfreetype6`), que la imagen ya lleva (`Dockerfile` del host, etapa `base`). Si falta, el build lo dice.
 - **`tile_weights.tsv.gz` no hace falta:** Planetiler solo lo usa para una estadística del log (el tamaño medio de las teselas ponderado por el tráfico de OSM) y no lo baja si no se le pide (`download_osm_tile_weights=false`). No se descarga.
 - **El pico de memoria del build se queda en el proceso de Java,** no en el de geko (MODULES.md del host, «Adaptador»). `-Xmx`, hilos y `--storage=mmap` salen de `geko-tiles.toml`.
 - **Las descargas son del `Downloader` del host,** como en el geocoder: el módulo decide qué URL necesita y dónde dejarla, y las baja con el `Downloader` que recibe por la SDK, sin cliente HTTP propio ni `--download` de Planetiler. Así valen `offline`, la caché `raw/`, `accept_licenses` y las licencias del manifiesto. Los extractos de Geofabrik son las mismas URLs que las del geocoder, para compartirse en `raw/`; además, los polígonos de agua (osmdata) y Natural Earth. Planetiler recibe las rutas locales.
@@ -35,7 +35,7 @@ Planetiler deja un PMTiles del ámbito, que es solo un formato de trabajo. Una e
 
 - `hot/index.bin` (fijado en RAM): los `tile_id` de Hilbert ordenados (`u64`) y, en paralelo, su posición y tamaño empaquetados (`u64`). Búsqueda binaria; si se mide que compensa, disposición de Eytzinger.
 - `tiles.bin` (mapeado, sin fijar): las teselas comprimidas, una tras otra. Las idénticas (mar, tierra vacía) se guardan una vez y varias entradas del índice apuntan a ellas.
-- `geko tiles export` dará un PMTiles para quien lo quiera.
+- `geko tiles export` dará un PMTiles para quien lo quiera. **Sin hacer:** el módulo no declara ninguna orden (`commands` en `module/src/lib.rs`).
 
 ### Servicio
 
@@ -98,7 +98,48 @@ Cerrados con Baleares («Medidas»): la compresión (el gzip de Planetiler; brot
 6. **Estilos, fuentes y sprites** (hecho, 2026-10-24): `module/src/styles.rs` y `module/src/assets.rs` («Estilos»). Las descargas van en paralelo (`[data] parallel_downloads`) y las fijadas por sha256 cuya ficha ya lo tiene no se vuelven a pedir. La demo del host (rama `feature/tiles-demo` de geko) pinta las teselas propias con el estilo claro u oscuro, en el idioma del navegador, si `tiles` está activo, con MapLibre dentro de Leaflet; la imagen del host lleva `libfontconfig1` y `make start-dev` compila el módulo con su perfil y sus estilos.
 7. **Comprobaciones** (hecho, 2026-10-25): el golden de Baleares, `ci/test.sh --variant golden` (`ci/golden.sh`, `ci/golden-snapshot.sh`, `module/examples/golden.rs`, AGENTS.md): construye sobre las descargas congeladas de `golden/snapshot` y compara con `golden/baseline.json` el número y el tamaño de las teselas por zoom, el sha256 de todas, el de las teselas de seis lugares en ocho zooms, el de `metadata.json` y el de las fuentes y sprites. Se congela solo lo que no fija `planetiler/profile.toml`, y osmdata recortado al ámbito: recortarlo otra vez da los mismos ficheros (`module/src/golden.rs`, con su prueba), así que 1,8 GB se quedan en 9 MB y el snapshot en 76 MB. Sin qrank (121 MB del mundo entero). Pruebas nuevas del servicio: estilos, fuentes (la lista de pilas, el enlace de la devanagari) y sprites con sus cabeceras, y peticiones raras a un bundle cargado (lo que la conformidad del SDK pregunta sin bundle). El índice (`tileset`, `serve`) y la fusión (`pbf`: objetos repetidos, orden, determinismo, un extracto desordenado) ya tenían las suyas. El golden es un job propio de la CI (`golden`), que lee el snapshot de `ghcr.io/candymaps/geko-tiles/golden` con el token del workflow.
 8. **Publicación** (hecho, 2026-10-26): `0.1.0`, la primera versión, con su etiqueta `v0.1.0` y su release; `tiles` entra en `ci/modules` del host y vuelve a estar activo por defecto (`develop/geko.toml` del host lo deja desactivado, para no generar teselas en cada `make start-dev`). Dos arreglos de la CI al publicar: el golden pasa el perfil a `build.rs` con ruta absoluta (corre en `module/`), y `ci/profile.sh` vuelve a clonar Protomaps si el clon que restaura la caché de `target/` no encuentra su commit («not our ref»).
-9. **Después, según las medidas:** brotli, MLT, el recorte al estilo y, con el panel de control, estilos propios del usuario.
+9. **Después:** lo que queda está, en orden, en «Lo que falta». Brotli queda descartado («Conclusiones», 1).
+
+## Lo que falta (2026-11-04)
+
+En el orden en que se hará. Los puntos 1 a 8 son imprescindibles para dar el módulo por terminado; los demás se cierran con una prueba o una decisión. Fuera, como dice «Objetivo»: ráster, relieve y actualización por minuto. Descartados o innecesarios según las medidas: brotli, run-lengths en el índice y paralelizar la fusión de extractos.
+
+### Cerrar lo empezado
+
+1. **Imágenes del modo operator:** los pull requests de `geko-tiles`, `geko-geocoder` y el host (`feature/module-image` y `feature/module-images`), hasta `main`.
+2. **Release de los dos módulos:** sin ella no existe `latest` y `overlays/prod` del host no puede descargar las imágenes. Es también la primera ejecución real del paso nuevo de `publish.yml`.
+3. **España con la imagen:** comprobar Planetiler dentro de la imagen de principio a fin, como en el Job del operador. El intento del 2026-11-03 no terminó: osmdata rechazaba las conexiones y, con sus zips de otro build, el sistema lo paró por falta de memoria. Hay que empezar con memoria libre.
+4. **Medida en frío con España:** si una lectura de disco en `tiles.bin` retrasa las demás peticiones («El servicio por HTTP y las estadísticas»). Si las retrasa, cambiar cómo se sirven las teselas (por ejemplo, `pool: true`) y medirlo otra vez.
+5. **Modo operator en GitHub:** activar el workflow `operator` del host (secreto `GEKO_MODULES_TOKEN`), hacer que un cambio del host reconstruya las imágenes de los módulos y medir España en el clúster.
+
+### Funcionalidad
+
+6. **Estilos propios desde el panel** (lo único grande que queda):
+   - Dónde se guardan: los bundles son inmutables y un estilo debe poder cambiar sin regenerar teselas.
+   - Que todas las réplicas los vean.
+   - Rutas para guardar, listar y borrar (la SDK ya tiene `Method::Post`) y validación del JSON de MapLibre.
+   - Servirlos como los de Protomaps, con sus URLs compuestas.
+   - El editor en el panel, que hoy solo muestra información.
+   - Si se admiten fuentes y sprites propios.
+7. **URLs absolutas por defecto:** con `url = "/tiles"`, MapLibre no puede cargar un estilo por su URL («Estilos»). El módulo no conoce el `Host`: hace falta añadirlo a `Request` en el contrato del host.
+8. **Las teselas con API keys:** con `[serve] api_keys`, las rutas de `/tiles/` piden clave y las URLs que escribe el módulo no la llevan. Decidir entre rutas públicas o claves en las URLs, junto con el punto 6, porque afecta a las mismas rutas.
+9. **`geko tiles export`:** el PMTiles de «Formato en el bundle», o quitarlo del plan si ya no interesa.
+
+### Comprobaciones
+
+10. **MLT de punta a punta:** es una opción, pero el golden solo cubre MVT.
+11. **Ámbitos grandes y raros:** solo hay medidas hasta España. Probar un país grande (Estados Unidos), varios países a la vez y algo que cruce el antimeridiano, que el código no trata.
+12. **Golden, perfil y estilos en la CI:** confirmar que pasan y que los tests de estilos corren con el perfil compilado: sin él, `styles_compose_with_the_urls_of_the_bundle` sale sin comprobar nada.
+13. **Clientes sin gzip:** las teselas salen siempre con `Content-Encoding: gzip`, sin mirar qué acepta el cliente. Confirmar que los clientes reales lo soportan.
+14. **Si cae una fuente:** qué hace una actualización cuando osmdata no responde y ya hay datos anteriores. Solo se ha visto fallar en un build sin ellos.
+
+### Decisiones
+
+15. **«Por decidir» 6 y 3:** resolver las teselas de más de Planetiler, lo más caro del build y la mejora de eficiencia más clara que queda. El recorte al estilo se propone descartarlo: choca con que cualquier estilo pueda pintar las teselas.
+
+### Para abrir el servicio
+
+16. **Revisión legal y limpieza:** las licencias con un abogado (punto 26 del host, «Licencias»), borrar los worktrees ya fusionados, revisar `feature/tiles-demo` del host, quitar los restos de las pruebas y dejar el README y este plan al día.
 
 ## Licencias
 
@@ -198,7 +239,23 @@ El `planetiler.jar` oficial con el perfil parcheado («Entradas globales»), z14
 - **Carga:** 30 ms (leer el índice de 8,7 MB y comprobarlo entero); 11 MB de RSS antes de servir. Lo demás es `tiles.bin` mapeado, en la caché de páginas del sistema.
 - **Contadores:** sin los dos contadores atómicos de cada tesela, 5,06 millones por segundo en vez de 4,86 (un 4 %, dentro del ruido): se quedan.
 - **Run-lengths en el índice:** no compensan. El índice de España ocupa 8,7 MB y la búsqueda no es lo que cuesta: el tiempo se va en copiar el cuerpo. El servicio queda muy por debajo de lo que tarda el HTTP del host.
-- Falta medirlo en frío (sin la caché de páginas) y por HTTP, con el host.
+- Por HTTP, con el host: abajo («El servicio por HTTP»). Falta medirlo en frío con España.
+
+### El servicio por HTTP y las estadísticas: Baleares, 2026-11-03
+
+La imagen del módulo (`ci/image.Dockerfile`, `0.2.0`) sirviendo un bundle de Baleares, en WSL con Docker (16 hilos): el servidor en 8 núcleos y `wrk` en los otros 8, con teselas al azar de todos los zooms y `?v=` del bundle (21 KB de media). Tres tandas de 10 s por fila.
+
+| Conexiones | Peticiones/s | p50 | p99 |
+|---|---|---|---|
+| 1 | 8.000 | 105 µs | 220 µs |
+| 16 | 60.000 | 200 µs | 0,6 a 3 ms |
+| 64 | 97.000 (2 GB/s) | 560 µs | 1,9 a 2,4 ms |
+| 256 | 95.000 | 2,5 ms | 6 a 7 ms |
+
+- **Límite:** con 8 núcleos, unas 96.000 teselas por segundo; `/health`, sin cuerpo y sin llegar al módulo, unas 160.000. Limita mover los bytes por HTTP, no el índice. 35 MB de memoria del contenedor.
+- **`stats.rs`** (A/B alternado, 6 rondas, `module/examples/serve.rs`, sin HTTP, contra el commit anterior a las estadísticas): con 16 hilos, 5,9 millones de teselas por segundo antes y 5,2 después (−13 %), p50 1,2 → 1,6 µs y p99 5,0 → 5,4 µs; con 1 hilo, −10 %. Son 10 incrementos atómicos por tesela en vez de 2. Se quedan: los 0,4 µs son el 0,4 % de los 105 µs de una petición por HTTP.
+- **`timeout` de `wrk`:** algunas tandas dan decenas de ellos, también contra `/health`, sin bajar las peticiones por segundo ni subir la p99: una parada real de 2 s quitaría un 20 %. No son del módulo; es probable que sean de la medida, sin causa confirmada.
+- **En frío, sin valor con Baleares:** quitar la caché de páginas sube la p50 de 105 a 118 µs y la p99 a 290 µs, pero 31 MB vuelven a la caché al momento. La duda sigue abierta para un bundle mayor que la memoria: con `pool: false`, un fallo de página en `tiles.bin` ocupa el hilo que atiende la petición. Hay que medir con España si una lectura de disco retrasa las demás peticiones.
 
 ### Estilos, fuentes y sprites: Baleares, 2026-10-24 (paso 6)
 
