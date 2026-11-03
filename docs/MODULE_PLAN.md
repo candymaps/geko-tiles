@@ -35,7 +35,7 @@ Planetiler deja un PMTiles del ámbito, que es solo un formato de trabajo. Una e
 
 - `hot/index.bin` (fijado en RAM): los `tile_id` de Hilbert ordenados (`u64`) y, en paralelo, su posición y tamaño empaquetados (`u64`). Búsqueda binaria; si se mide que compensa, disposición de Eytzinger.
 - `tiles.bin` (mapeado, sin fijar): las teselas comprimidas, una tras otra. Las idénticas (mar, tierra vacía) se guardan una vez y varias entradas del índice apuntan a ellas.
-- `geko tiles export` dará un PMTiles para quien lo quiera. **Sin hacer:** el módulo no declara ninguna orden (`commands` en `module/src/lib.rs`).
+- `geko tiles export <fichero>` da un PMTiles para quien lo quiera (`module/src/export.rs`, 2026-11-04): `tiles.bin` tal cual y solo se hacen los directorios, con las teselas seguidas de igual contenido como una sola entrada.
 
 ### Servicio
 
@@ -51,6 +51,20 @@ Planetiler deja un PMTiles del ámbito, que es solo un formato de trabajo. Una e
 - **Rutas:** `/tiles/styles.json` (sabores, idiomas y la plantilla de la URL), `/tiles/styles/{sabor}/{idioma}.json`, `/tiles/fonts/{fontstack}/{range}.pbf` (de una lista de fuentes, la primera que hay) y `/tiles/sprites/{nombre}`; fuentes y sprites, `immutable` con `?v=` del bundle en uso, como las teselas.
 - **Nombre:** Protomaps pide otro nombre para teselas o estilos modificados, y nuestro perfil lleva parches: `tilejson.json` se llama «geko tiles» y nombra el esquema de Protomaps en su descripción; la atribución es la de sus estilos, «Protomaps © OpenStreetMap».
 - **Estilos propios** (paso 9, desde el panel de control): un estilo es un JSON de MapLibre, datos. El panel puede generar las capas de un sabor propio con `@protomaps/basemaps` en el navegador, o editar un estilo entero, y geko lo serviría como los de Protomaps, sin regenerar teselas mientras pinte lo que llevan.
+
+### Estilos propios (2026-11-04)
+
+- **Fuera del bundle:** un estilo debe cambiar sin regenerar teselas y los bundles son inmutables. Cada uno es un fichero de `<datos>/tiles-styles/`, fuera también de `tiles/`, el trabajo del build.
+- **Todas las réplicas los ven:** comparten ese volumen (`[deploy]`, `ReadWriteMany`) y el módulo lee el fichero en cada petición, sin copia en memoria. Un mapa pide su estilo una vez: no es el camino de las teselas. Se guarda con un fichero temporal y `rename`, así que nadie lee medio estilo.
+- **Rutas:** `GET styles/custom/{name}`, `POST styles/custom/{name}/save` y `POST styles/custom/{name}/delete`, en el pool. Son rutas distintas porque `Request` no lleva el método.
+- **Quién escribe:** `[styles] editable`, apagado por defecto. Sin `[serve] api_keys`, el host deja pasar todo, y una ruta que escribe en disco no puede estar abierta sin que nadie lo haya pedido. No es configuración del estilo, que nunca pasa por `geko-tiles.toml`.
+- **Validación:** nombre seguro como fichero y como URL, 1 MiB y 200 estilos como mucho, `version: 8`, ids únicos, tipos de capa conocidos y fuentes que existen. Los valores de `paint` y `layout` no se comprueban: harían falta las reglas de MapLibre en Rust.
+- **Al servirlo:** la fuente `protomaps` siempre son las teselas del bundle en uso; `glyphs` y `sprite`, los del bundle si el estilo no trae los suyos.
+- **Fuentes y sprites propios:** no se suben a geko. Un estilo puede apuntar a los suyos por URL, y los del bundle siguen siendo inmutables.
+
+### API keys en las URLs (2026-11-04)
+
+Con `[serve] api_keys`, todo `/tiles/` pide clave. Las rutas no se han hecho públicas: `Route::public` compara la ruta exacta, así que no sirve para `{z}/{x}/{y}`, y dejaría las teselas abiertas a quien configuró claves. En su lugar, quien pide un estilo o `tilejson.json` con `?api_key=` recibe esa misma clave en cada URL de la respuesta. El estilo con clave se compone en cada petición y no se guarda: si el host no comprueba claves, cualquiera podría llenar la memoria con claves inventadas.
 
 ### Formato de las teselas: MVT, y MLT como opción (2026-10-24)
 

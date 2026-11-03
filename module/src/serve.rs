@@ -16,6 +16,7 @@ use geko_module_sdk::{GekoError, Result};
 use memmap2::Mmap;
 use serde_json::json;
 
+use crate::custom::{self, Refused, Store};
 use crate::pmtiles::tile_id;
 use crate::stats::Stats;
 use crate::styles::{self, Assets, Styles, Urls};
@@ -27,7 +28,7 @@ const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 /// bundle in use, an error.
 const REVALIDATE: &str = "no-cache";
 /// The attribution of the tiles: Protomaps asks for it with its styles, and OSM always.
-const ATTRIBUTION: &str = r#"<a href="https://github.com/protomaps/basemaps">Protomaps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>"#;
+pub const ATTRIBUTION: &str = r#"<a href="https://github.com/protomaps/basemaps">Protomaps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>"#;
 
 /// The part of one bundle, ready to serve.
 struct Loaded {
@@ -69,6 +70,13 @@ pub struct Server {
     settings: serde_json::Value,
     /// The data directory of the host, where the build leaves the stages of its last run.
     data_dir: std::path::PathBuf,
+    /// The styles of the user.
+    custom: Store,
+}
+
+/// The API key of a request, which the URLs it gets back must carry (`[serve] api_keys`).
+fn api_key(request: &Request) -> Option<&str> {
+    request.query.iter().find(|(k, v)| k == "api_key" && !v.is_empty()).map(|(_, v)| v.as_str())
 }
 
 impl Server {
@@ -80,7 +88,13 @@ impl Server {
             stats: Stats::default(),
             settings: serde_json::Value::Null,
             data_dir: std::path::PathBuf::new(),
+            custom: Store::new(Path::new(""), false),
         }
+    }
+
+    pub fn with_custom(mut self, custom: Store) -> Self {
+        self.custom = custom;
+        self
     }
 
     pub fn with_settings(mut self, settings: serde_json::Value) -> Self {
@@ -125,12 +139,18 @@ impl Server {
             _ => {}
         }
         let param = |name: &str| request.params.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str()).unwrap_or_default();
+        match request.route.as_str() {
+            "styles/custom/{name}/save" => return self.save(param("name"), &request.body).with_header("Cache-Control", REVALIDATE),
+            "styles/custom/{name}/delete" => return self.delete(param("name")).with_header("Cache-Control", REVALIDATE),
+            _ => {}
+        }
         let response = match (&*loaded, request.route.as_str()) {
             (None, _) => Response::error(503, "no tiles bundle loaded"),
-            (Some(l), "tilejson.json") => Response::new(200, "application/json", l.tilejson.clone()).with_header("Cache-Control", REVALIDATE),
+            (Some(l), "tilejson.json") => Response::new(200, "application/json", keyed_tilejson(l, &self.url, api_key(request))).with_header("Cache-Control", REVALIDATE),
             (Some(l), "{z}/{x}/{y}") => self.tile(l, request),
             (Some(_), "styles.json") => self.catalog(),
-            (Some(l), "styles/{flavor}/{lang}") => self.style(l, param("flavor"), param("lang")),
+            (Some(l), "styles/{flavor}/{lang}") => self.style(l, param("flavor"), param("lang"), api_key(request)),
+            (Some(l), "styles/custom/{name}") => self.custom_style(l, param("name"), api_key(request)),
             (Some(l), "fonts/{fontstack}/{range}") => {
                 let range = param("range");
                 let range = range.strip_suffix(".pbf").unwrap_or(range);
@@ -189,6 +209,8 @@ impl Server {
                 "languages": languages.len(),
                 "fonts": fonts,
                 "sprites": paths().filter(|p| p.starts_with("sprites/") && p.ends_with(".json")).count(),
+                "custom": self.custom.list(),
+                "editable": self.custom.editable(),
             },
             "sources": l.sources,
             "settings": self.settings,
@@ -225,11 +247,22 @@ impl Server {
     /// `styles.json`: the styles there are, and the URL of each one.
     fn catalog(&self) -> Response {
         let (flavors, langs) = styles::catalog();
-        let body = json!({ "flavors": flavors, "languages": langs, "style": format!("{}/styles/{{flavor}}/{{lang}}.json", self.url) });
+        let body = json!({
+            "flavors": flavors,
+            "languages": langs,
+            "style": format!("{}/styles/{{flavor}}/{{lang}}.json", self.url),
+            "custom": self.custom.list(),
+            "custom_style": format!("{}/styles/custom/{{name}}.json", self.url),
+            "editable": self.custom.editable(),
+        });
         Response::new(200, "application/json", serde_json::to_vec(&body).expect("JSON values serialize")).with_header("Cache-Control", REVALIDATE)
     }
 
-    fn style(&self, l: &Loaded, flavor: &str, lang: &str) -> Response {
+    fn urls<'a>(&'a self, l: &'a Loaded, key: Option<&'a str>) -> Urls<'a> {
+        Urls { url: &self.url, version: &l.version, tile_type: &l.tile_type, key }
+    }
+
+    fn style(&self, l: &Loaded, flavor: &str, lang: &str, key: Option<&str>) -> Response {
         let lang = lang.strip_suffix(".json").unwrap_or(lang);
         let Some(i) = styles::find(flavor, lang) else {
             return Response::error(404, &format!("no style {flavor}/{lang}: styles.json lists them"));
@@ -238,8 +271,50 @@ impl Server {
             return Response::error(503, "this bundle has no fonts or sprites: build it again");
         }
         self.stats.style(flavor, lang);
-        let body = l.styles.get(i, &Urls { url: &self.url, version: &l.version, tile_type: &l.tile_type }).to_vec();
+        let body = l.styles.get(i, &self.urls(l, key)).into_owned();
         Response::new(200, "application/json", body).with_header("Content-Encoding", "gzip").with_header("Cache-Control", REVALIDATE)
+    }
+
+    /// A style of the user: `name` may end in `.json`, as those of Protomaps.
+    fn custom_style(&self, l: &Loaded, name: &str, key: Option<&str>) -> Response {
+        let name = name.strip_suffix(".json").unwrap_or(name);
+        let Some(style) = self.custom.read(name) else {
+            return Response::error(404, "no such style: styles.json lists them");
+        };
+        if l.assets.is_none() {
+            return Response::error(503, "this bundle has no fonts or sprites: build it again");
+        }
+        self.stats.style("custom", name);
+        Response::new(200, "application/json", custom::compose(style, name, &self.urls(l, key))).with_header("Cache-Control", REVALIDATE)
+    }
+
+    fn save(&self, name: &str, body: &[u8]) -> Response {
+        if !self.custom.editable() {
+            return Response::error(403, "saving styles is off: [styles] editable in geko-tiles.toml");
+        }
+        match self.custom.save(name, body) {
+            Ok(Ok(())) => self.json(json!({ "saved": name })),
+            Ok(Err(Refused::Invalid(why))) => Response::error(400, &why),
+            Ok(Err(Refused::Full)) => Response::error(409, &format!("there are already {} styles: delete one", custom::MAX_STYLES)),
+            Err(e) => {
+                tracing::error!(style = name, error = %e, "cannot save a style");
+                Response::error(500, "the style could not be saved")
+            }
+        }
+    }
+
+    fn delete(&self, name: &str) -> Response {
+        if !self.custom.editable() {
+            return Response::error(403, "deleting styles is off: [styles] editable in geko-tiles.toml");
+        }
+        match self.custom.delete(name) {
+            Ok(true) => self.json(json!({ "deleted": name })),
+            Ok(false) => Response::error(404, "no such style"),
+            Err(e) => {
+                tracing::error!(style = name, error = %e, "cannot delete a style");
+                Response::error(500, "the style could not be deleted")
+            }
+        }
     }
 
     pub fn metrics(&self, out: &mut String) {
@@ -257,6 +332,16 @@ impl Server {
             let _ = writeln!(out, "geko_tiles_index_bytes {}", 16 * l.ids.len());
         }
     }
+}
+
+/// The TileJSON of a bundle; with a key, its tiles carry it.
+fn keyed_tilejson(l: &Loaded, url: &str, key: Option<&str>) -> Vec<u8> {
+    if key.is_none() {
+        return l.tilejson.clone();
+    }
+    let mut tilejson: serde_json::Value = serde_json::from_slice(&l.tilejson).expect("the module wrote it");
+    tilejson["tiles"] = json!([Urls { url, version: &l.version, tile_type: &l.tile_type, key }.tiles()]);
+    serde_json::to_vec(&tilejson).expect("JSON values serialize")
 }
 
 /// A font or sprite, cached for good under the URL of the bundle in use, as the tiles are.
@@ -346,7 +431,7 @@ fn tilejson(meta: &Meta, metadata: &serde_json::Value, version: &str, url: &str)
         "version": metadata.get("version"),
         "attribution": ATTRIBUTION,
         "scheme": "xyz",
-        "tiles": [format!("{url}/{{z}}/{{x}}/{{y}}?v={version}")],
+        "tiles": [Urls { url, version, tile_type: &meta.tile_type, key: None }.tiles()],
         "minzoom": meta.min_zoom,
         "maxzoom": meta.max_zoom,
         "vector_layers": metadata.get("vector_layers"),
@@ -373,6 +458,10 @@ mod tests {
         let module = BundleModule { name: ModuleName::new("tiles").unwrap(), version: "0".into(), contract: CONTRACT, meta: serde_json::to_value(meta).unwrap() };
         let manifest = BundleManifest { format: 1, version: version.into(), created_unix: 0, modules: vec![module.clone()], licenses: vec![], artifacts: vec![] };
         BundleView { root: root.to_path_buf(), manifest, module }
+    }
+
+    fn post(server: &Server, route: &str, name: &str, body: &[u8]) -> Response {
+        server.handle(&Request { route: route.into(), params: vec![("name".into(), name.into())], body: body.to_vec(), ..Default::default() })
     }
 
     fn get(server: &Server, route: &str, params: &[(&str, &str)], query: &[(&str, &str)]) -> Response {
@@ -506,6 +595,66 @@ mod tests {
         assert_eq!(get(&server, "sprites/{name}", &[("name", "dark.png")], &[]).status, 404);
     }
 
+    #[test]
+    fn saves_and_serves_the_styles_of_the_user() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pmtiles = tmp.path().join("t.pmtiles");
+        fs::write(&pmtiles, archive(&[(tile_id(0, 0, 0), b"world")], 0)).unwrap();
+        let meta = tileset::convert(&pmtiles, &tmp.path().join("a/tiles"), &[BBox { west: 1.0, south: 38.5, east: 4.6, north: 40.2 }]).unwrap();
+        pack_assets(tmp.path(), &tmp.path().join("a/tiles/assets"));
+        let style = br#"{"version":8,"layers":[{"id":"water","type":"fill","source":"protomaps","source-layer":"water"}]}"#;
+        const SAVE: &str = "styles/custom/{name}/save";
+        const DELETE: &str = "styles/custom/{name}/delete";
+
+        // Off, nothing is written, even with a good body.
+        let closed = Server::new("/tiles").with_custom(Store::new(tmp.path(), false));
+        assert_eq!((post(&closed, SAVE, "mine", style).status, post(&closed, DELETE, "mine", b"").status), (403, 403));
+        assert!(!tmp.path().join("tiles-styles").exists());
+
+        let server = Server::new("/tiles").with_custom(Store::new(tmp.path(), true));
+        // It can be saved before there is a bundle, and asked for only with one.
+        assert_eq!(post(&server, SAVE, "mine", style).status, 200);
+        let read = |key: &[(&str, &str)]| get(&server, "styles/custom/{name}", &[("name", "mine.json")], key);
+        assert_eq!(read(&[]).status, 503);
+        server.load(&view(&tmp.path().join("a"), "b1", &meta)).unwrap();
+
+        let r = read(&[]);
+        let served: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+        assert_eq!((r.status, header(&r, "Cache-Control"), header(&r, "Content-Encoding")), (200, Some(REVALIDATE), None));
+        assert_eq!(served["sources"]["protomaps"]["url"], "/tiles/tilejson.json");
+        assert_eq!(served["sprite"], "/tiles/sprites/light?v=b1");
+        let served: serde_json::Value = serde_json::from_slice(&read(&[("api_key", "k1")]).body).unwrap();
+        assert_eq!(served["sources"]["protomaps"]["url"], "/tiles/tilejson.json?api_key=k1");
+
+        // Another replica, on the same volume, answers what this one saved at once.
+        let other = Server::new("/tiles").with_custom(Store::new(tmp.path(), false));
+        other.load(&view(&tmp.path().join("a"), "b1", &meta)).unwrap();
+        let catalog: serde_json::Value = serde_json::from_slice(&get(&other, "styles.json", &[], &[]).body).unwrap();
+        assert_eq!((&catalog["custom"], &catalog["custom_style"]), (&json!(["mine"]), &json!("/tiles/styles/custom/{name}.json")));
+        let status: serde_json::Value = serde_json::from_slice(&get(&other, "status.json", &[], &[]).body).unwrap();
+        assert_eq!((&status["styles"]["custom"], &status["styles"]["editable"]), (&json!(["mine"]), &json!(false)));
+
+        assert_eq!(post(&server, SAVE, "mine", b"{").status, 400);
+        assert_eq!(post(&server, SAVE, "../mine", style).status, 400);
+        assert_eq!(read(&[]).status, 200, "a refused style leaves the one saved");
+        assert_eq!(post(&server, DELETE, "mine", b"").status, 200);
+        assert_eq!((post(&server, DELETE, "mine", b"").status, read(&[]).status), (404, 404));
+    }
+
+    #[test]
+    fn a_key_in_the_request_is_in_the_urls_it_gets_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pmtiles = tmp.path().join("t.pmtiles");
+        fs::write(&pmtiles, archive(&[(tile_id(0, 0, 0), b"world")], 0)).unwrap();
+        let meta = tileset::convert(&pmtiles, &tmp.path().join("a/tiles"), &[BBox { west: 1.0, south: 38.5, east: 4.6, north: 40.2 }]).unwrap();
+        let server = Server::new("/tiles");
+        server.load(&view(&tmp.path().join("a"), "b1", &meta)).unwrap();
+        let tiles = |query: &[(&str, &str)]| serde_json::from_slice::<serde_json::Value>(&get(&server, "tilejson.json", &[], query).body).unwrap()["tiles"][0].clone();
+        assert_eq!(tiles(&[("api_key", "k1")]), "/tiles/{z}/{x}/{y}?v=b1&api_key=k1");
+        assert_eq!(tiles(&[("api_key", "")]), "/tiles/{z}/{x}/{y}?v=b1");
+        assert_eq!(tiles(&[]), "/tiles/{z}/{x}/{y}?v=b1");
+    }
+
     /// What the conformance suite of the SDK asks with no bundle loaded, asked of a loaded one: odd
     /// parameters are answered, never with 500, and an error is JSON.
     #[test]
@@ -520,11 +669,14 @@ mod tests {
 
         let long = "x".repeat(10_000);
         let odd = ["", "../../etc/passwd", "99999999999999999999", "-0", "0x1", "\u{0}", "🦎", ",,,", " , ", "a/b", "%2e%2e", long.as_str()];
-        let routes: [(&str, &[&str]); 7] = [
+        let routes: [(&str, &[&str]); 10] = [
             ("{z}/{x}/{y}", &["z", "x", "y"]),
             ("tilejson.json", &[]),
             ("styles.json", &[]),
             ("styles/{flavor}/{lang}", &["flavor", "lang"]),
+            ("styles/custom/{name}", &["name"]),
+            ("styles/custom/{name}/save", &["name"]),
+            ("styles/custom/{name}/delete", &["name"]),
             ("fonts/{fontstack}/{range}", &["fontstack", "range"]),
             ("sprites/{name}", &["name"]),
             ("no/such/route", &[]),

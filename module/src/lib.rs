@@ -5,6 +5,8 @@
 
 mod assets;
 mod config;
+mod custom;
+mod export;
 mod extracts;
 mod geo;
 #[doc(hidden)]
@@ -23,7 +25,7 @@ mod tileset;
 use std::time::Duration;
 
 use geko_module_sdk::Result;
-use geko_module_sdk::module::{self, Built, BundleView, Context, Description, Method, Module, ModuleName, Purge, Request, Response, Route};
+use geko_module_sdk::module::{self, Built, BundleView, CommandInfo, Context, Description, Method, Module, ModuleName, Purge, Request, Response, Route};
 
 use crate::pipeline::Setup;
 
@@ -31,7 +33,8 @@ pub const NAME: &str = "tiles";
 
 pub fn open(context: Context) -> Result<Box<dyn Module>> {
     let config = config::Config::parse(&context.config, &context.config_file)?;
-    let server = serve::Server::new(&config.url).with_settings(settings(&config)).with_data_dir(context.data_dir.clone());
+    let store = custom::Store::new(&context.data_dir, config.styles.editable);
+    let server = serve::Server::new(&config.url).with_settings(settings(&config)).with_data_dir(context.data_dir.clone()).with_custom(store);
     Ok(Box::new(TilesModule { setup: Setup { config, scope: context.scope, data_dir: context.data_dir, data: context.data }, server }))
 }
 
@@ -50,6 +53,7 @@ fn settings(config: &config::Config) -> serde_json::Value {
         setting("planetiler.threads", config.planetiler.threads.into(), d.planetiler.threads.into(), "rebuild"),
         setting("planetiler.storage", config.planetiler.storage.as_str().into(), d.planetiler.storage.as_str().into(), "rebuild"),
         setting("planetiler.qrank", config.planetiler.qrank.into(), d.planetiler.qrank.into(), "rebuild"),
+        setting("styles.editable", config.styles.editable.into(), d.styles.editable.into(), "restart"),
     ])
 }
 
@@ -61,6 +65,8 @@ pub struct TilesModule {
 impl Module for TilesModule {
     fn describe(&self) -> Description {
         let route = |path: &str| Route { method: Method::Get, path: path.into(), pool: false, public: false };
+        // They read or write a file and parse it: off the threads that answer the tiles.
+        let file = |method: Method, path: &str| Route { method, path: path.into(), pool: true, public: false };
         Description {
             name: ModuleName::new(NAME).expect("a valid name"),
             version: geko_module_sdk::module_version!().to_owned(),
@@ -70,6 +76,9 @@ impl Module for TilesModule {
                 route("tilejson.json"),
                 route("styles.json"),
                 route("styles/{flavor}/{lang}"),
+                file(Method::Get, "styles/custom/{name}"),
+                file(Method::Post, "styles/custom/{name}/save"),
+                file(Method::Post, "styles/custom/{name}/delete"),
                 route("fonts/{fontstack}/{range}"),
                 route("sprites/{name}"),
                 route("status.json"),
@@ -82,7 +91,7 @@ impl Module for TilesModule {
                     "notice": "The tiles are a Produced Work of OpenStreetMap: © OpenStreetMap contributors.",
                 },
             })),
-            commands: vec![],
+            commands: vec![CommandInfo { name: "export".into(), about: "Write the tiles of the current bundle to a PMTiles file: export <file.pmtiles>".into() }],
         }
     }
 
@@ -127,6 +136,13 @@ impl Module for TilesModule {
 
     fn metrics(&self, out: &mut String) {
         self.server.metrics(out);
+    }
+
+    fn command(&self, name: &str, args: &[String]) -> Result<String> {
+        match name {
+            "export" => export::run(&self.setup.data_dir, args, serve::ATTRIBUTION),
+            _ => Err(geko_module_sdk::GekoError::Config(format!("unknown command `{name}`"))),
+        }
     }
 
     fn shutdown(&self) -> Result<()> {
