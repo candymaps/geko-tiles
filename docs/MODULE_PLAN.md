@@ -107,7 +107,7 @@ En el orden en que se hará. Los puntos 1 a 8 son imprescindibles para dar el m�
 ### Cerrar lo empezado
 
 1. **Imágenes del modo operator:** los pull requests de `geko-tiles`, `geko-geocoder` y el host (`feature/module-image` y `feature/module-images`), hasta `main`.
-2. **Release de los dos módulos:** sin ella no existe `latest` y `overlays/prod` del host no puede descargar las imágenes. Es también la primera ejecución real del paso nuevo de `publish.yml`.
+2. **Una versión nueva de los dos módulos** (por ejemplo, `0.2.1`): `v0.2.0` ya existe en los dos, con sus paquetes, pero es anterior a las imágenes. `publish.yml` solo crea `<versión>` y `latest` al subir la versión en `Cargo.toml`, y sin ellas `overlays/prod` del host no puede descargar las imágenes. Fusionar sin subirla no basta: el geocoder no publicaría ninguna imagen, porque su cambio no toca lo que entra en el módulo. Es también la primera ejecución real del paso nuevo de `publish.yml`.
 3. **España con la imagen:** comprobar Planetiler dentro de la imagen de principio a fin, como en el Job del operador. El intento del 2026-11-03 no terminó: osmdata rechazaba las conexiones y, con sus zips de otro build, el sistema lo paró por falta de memoria. Hay que empezar con memoria libre.
 4. **Medida en frío con España:** si una lectura de disco en `tiles.bin` retrasa las demás peticiones («El servicio por HTTP y las estadísticas»). Si las retrasa, cambiar cómo se sirven las teselas (por ejemplo, `pool: true`) y medirlo otra vez.
 5. **Modo operator en GitHub:** activar el workflow `operator` del host (secreto `GEKO_MODULES_TOKEN`), hacer que un cambio del host reconstruya las imágenes de los módulos y medir España en el clúster.
