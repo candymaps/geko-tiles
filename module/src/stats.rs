@@ -18,7 +18,7 @@ const SECONDS: usize = 60;
 const ZOOMS: usize = 32;
 
 /// The routes that are counted, as `Request::route` names them.
-const ROUTES: [&str; 6] = ["{z}/{x}/{y}", "tilejson.json", "styles.json", "styles/{flavor}/{lang}", "fonts/{fontstack}/{range}", "sprites/{name}"];
+const ROUTES: [&str; 7] = ["{z}/{x}/{y}", "tilejson.json", "styles.json", "styles/{flavor}/{lang}", "styles/custom/{name}", "fonts/{fontstack}/{range}", "sprites/{name}"];
 
 fn bucket(us: u64) -> usize {
     BOUNDS_US.iter().position(|&b| us <= b).unwrap_or(BOUNDS_US.len())
