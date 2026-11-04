@@ -97,10 +97,11 @@ fn encode(text: &str) -> String {
 }
 
 impl Styles {
-    /// The style `i` of `STYLES`, compressed with gzip. Kept only without a key: anyone may ask with
-    /// any key when the host checks none, and a map asks for its style once.
-    pub fn get(&self, i: usize, urls: &Urls) -> Cow<'_, [u8]> {
-        if urls.key.is_some() {
+    /// The style `i` of `STYLES`, compressed with gzip. Kept only if `keep` and without a key: the
+    /// key and the origin of a request are whatever it says, so keeping them would let anyone fill
+    /// the memory, and a map asks for its style once.
+    pub fn get(&self, i: usize, urls: &Urls, keep: bool) -> Cow<'_, [u8]> {
+        if !keep || urls.key.is_some() {
             return Cow::Owned(compose(i, urls));
         }
         Cow::Borrowed(self.composed[i].get_or_init(|| compose(i, urls)))
@@ -185,7 +186,7 @@ mod tests {
         let styles = Styles::default();
         let urls = Urls { url: "https://maps.example.com/tiles", version: "v1", tile_type: "mlt", key: None };
         let mut text = String::new();
-        GzDecoder::new(&*styles.get(i, &urls)).read_to_string(&mut text).unwrap();
+        GzDecoder::new(&*styles.get(i, &urls, true)).read_to_string(&mut text).unwrap();
         let style: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(style["sources"]["protomaps"]["url"], "https://maps.example.com/tiles/tilejson.json");
         assert_eq!(style["sources"]["protomaps"]["encoding"], "mlt");
@@ -199,12 +200,12 @@ mod tests {
         // A key is in every URL, and not in the style kept for the requests without one.
         let keyed = Urls { key: Some("a b&c"), ..urls };
         let mut text = String::new();
-        GzDecoder::new(&*styles.get(i, &keyed)).read_to_string(&mut text).unwrap();
+        GzDecoder::new(&*styles.get(i, &keyed, true)).read_to_string(&mut text).unwrap();
         let style: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(style["sources"]["protomaps"]["url"], "https://maps.example.com/tiles/tilejson.json?api_key=a%20b%26c");
         assert_eq!(style["sprite"], "https://maps.example.com/tiles/sprites/light?v=v1&api_key=a%20b%26c");
         let mut text = String::new();
-        GzDecoder::new(&*styles.get(i, &Urls { key: None, ..keyed })).read_to_string(&mut text).unwrap();
+        GzDecoder::new(&*styles.get(i, &Urls { key: None, ..keyed }, true)).read_to_string(&mut text).unwrap();
         assert!(!text.contains("api_key"));
     }
 
