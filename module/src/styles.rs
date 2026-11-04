@@ -178,6 +178,7 @@ mod tests {
     #[test]
     fn styles_compose_with_the_urls_of_the_bundle() {
         if STYLES.is_empty() {
+            assert!(option_env!("GEKO_TILES_PROFILE").is_none(), "the profile has styles");
             return; // Compiled without the profile: no styles.
         }
         let i = find("light", "es").expect("light, in Spanish");
