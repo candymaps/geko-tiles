@@ -64,6 +64,7 @@ Before optimizing, check this list so as not to repeat what was already discarde
 - Natural Earth by layers with the `--bounds` of the scope (2026-10-24, Baleares): the shapefile reader of Planetiler only reads what touches the bounds, and Sardinia vanished from z5 (4.4 % of the land of the tile). The gpkg reader reads everything when the table has no spatial index.
 
 **Did not work (do not repeat):**
+- The tiles on the pool of the host (`pool: true`) so that a read from disk blocks no thread that answers (2026-11-04, Spain): the p99 of a tile in RAM beside cold reads, 7.5 ms against 9.6 ms, but warm, 33,000 tiles per second against 88,000 and p50 from 126 to 195 µs. Stays `pool: false`.
 - Recompressing the tiles (2026-10-24, Baleares, z14): brotli-11 only saves 4.9 %, zopfli 1.6 %, gzip-9 nothing. The gzip of Planetiler stays.
 - One Planetiler run per extract and a merge of the tiles (2026-10-24, La Rioja and Navarra): 6 % of the features of the shared tiles appear in both runs (the extracts carry whole the ways that cross their border), and removing them by id does not give the same tiles as one run (lines are joined differently when the zoom goes down). `--clip` does not avoid it.
 - `osmium merge` without `--bounds`: the merged PBF has no bounds in its header, and Planetiler takes them from the nodes and builds far too much (47,365 tiles against 14,076).
