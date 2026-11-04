@@ -72,6 +72,10 @@ The source `protomaps` of a style is always the tiles of the bundle in use. With
 
 With `[serve] api_keys` in `geko.toml`, ask for a style or for `tilejson.json` with `?api_key=<key>`: every URL in the answer carries that key, so that the map can load the tiles, fonts and sprites.
 
+### Compression
+
+Tiles, fonts and the styles of Protomaps are sent as stored, with `Content-Encoding: gzip`, whatever the client asks: browsers and map libraries read them as they are, and with `curl` use `--compressed`.
+
 ### PMTiles
 
 `geko tiles export <file.pmtiles>` writes the tiles of the current bundle to one PMTiles archive, to serve them with something else.

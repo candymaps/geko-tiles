@@ -116,44 +116,31 @@ Cerrados con Baleares («Medidas»): la compresión (el gzip de Planetiler; brot
 
 ## Lo que falta (2026-11-04)
 
-En el orden en que se hará. Los puntos 1 a 8 son imprescindibles para dar el módulo por terminado; los demás se cierran con una prueba o una decisión. Fuera, como dice «Objetivo»: ráster, relieve y actualización por minuto. Descartados o innecesarios según las medidas: brotli, run-lengths en el índice y paralelizar la fusión de extractos.
+Estado tras cerrar lo que se podía desde aquí. Fuera, como dice «Objetivo»: ráster, relieve y actualización por minuto. Descartados o innecesarios según las medidas: brotli, run-lengths en el índice y paralelizar la fusión de extractos.
 
-### Cerrar lo empezado
+### Hecho
 
-1. **Imágenes del modo operator:** los pull requests de `geko-tiles`, `geko-geocoder` y el host (`feature/module-image` y `feature/module-images`), hasta `main`.
-2. **Una versión nueva de los dos módulos** (por ejemplo, `0.2.1`): `v0.2.0` ya existe en los dos, con sus paquetes, pero es anterior a las imágenes. `publish.yml` solo crea `<versión>` y `latest` al subir la versión en `Cargo.toml`, y sin ellas `overlays/prod` del host no puede descargar las imágenes. Fusionar sin subirla no basta: el geocoder no publicaría ninguna imagen, porque su cambio no toca lo que entra en el módulo. Es también la primera ejecución real del paso nuevo de `publish.yml`.
-3. **España con la imagen:** comprobar Planetiler dentro de la imagen de principio a fin, como en el Job del operador. El intento del 2026-11-03 no terminó: osmdata rechazaba las conexiones y, con sus zips de otro build, el sistema lo paró por falta de memoria. Hay que empezar con memoria libre.
-4. **Medida en frío con España:** si una lectura de disco en `tiles.bin` retrasa las demás peticiones («El servicio por HTTP y las estadísticas»). Si las retrasa, cambiar cómo se sirven las teselas (por ejemplo, `pool: true`) y medirlo otra vez.
-5. **Modo operator en GitHub:** activar el workflow `operator` del host (secreto `GEKO_MODULES_TOKEN`), hacer que un cambio del host reconstruya las imágenes de los módulos y medir España en el clúster.
+- **España con la imagen:** de principio a fin, Planetiler incluido, en 13 min 17 s («El servicio en frío»).
+- **Medida en frío:** una lectura de disco sí retrasa las demás peticiones, pero `pool: true` no compensa y se queda `pool: false`.
+- **Imágenes al cambiar el host:** `refresh-image`, un workflow diario en cada módulo, probado contra un registro local. Aún no ha corrido en GitHub.
+- **Estilos propios** («Estilos propios»): rutas, validación, réplicas y el editor del panel (host, `ui/src/tiles/TilesPage.tsx`). El editor es un campo de texto con el JSON: sin vista previa del mapa.
+- **API keys** («API keys en las URLs») y **`geko tiles export`**.
+- **MLT de punta a punta:** build sobre los datos del golden y 496 de 496 teselas de muestra leídas por `@maplibre/mlt` 1.3.0, el decodificador de MapLibre GL JS. No se ha pintado en un navegador.
+- **Golden, perfil y estilos:** `ci/test.sh` pasa en sus cuatro variantes, con las teselas idénticas byte a byte. La variante `profile` repite ahora los tests de estilos con el perfil compilado, y el test falla si el perfil no trae estilos.
+- **Si cae una fuente:** con osmdata caído de verdad, el build con `refresh = "always"` se para con error y el bundle en uso sigue sirviéndose. Se acepta: la siguiente actualización lo reintenta.
+- **Clientes sin gzip:** las teselas salen con `Content-Encoding: gzip` aunque el cliente no pida gzip (comprobado con `curl`). Se queda así: decidirlo por petición exigiría pasar `Accept-Encoding` a `Request` y descomprimir al servir. El README lo avisa. No se ha probado con clientes nativos.
 
-### Funcionalidad
+### Pendiente
 
-6. **Estilos propios desde el panel** (lo único grande que queda):
-   - Dónde se guardan: los bundles son inmutables y un estilo debe poder cambiar sin regenerar teselas.
-   - Que todas las réplicas los vean.
-   - Rutas para guardar, listar y borrar (la SDK ya tiene `Method::Post`) y validación del JSON de MapLibre.
-   - Servirlos como los de Protomaps, con sus URLs compuestas.
-   - El editor en el panel, que hoy solo muestra información.
-   - Si se admiten fuentes y sprites propios.
-7. **URLs absolutas por defecto:** con `url = "/tiles"`, MapLibre no puede cargar un estilo por su URL («Estilos»). El módulo no conoce el `Host`: hace falta añadirlo a `Request` en el contrato del host.
-8. **Las teselas con API keys:** con `[serve] api_keys`, las rutas de `/tiles/` piden clave y las URLs que escribe el módulo no la llevan. Decidir entre rutas públicas o claves en las URLs, junto con el punto 6, porque afecta a las mismas rutas.
-9. **`geko tiles export`:** el PMTiles de «Formato en el bundle», o quitarlo del plan si ya no interesa.
-
-### Comprobaciones
-
-10. **MLT de punta a punta:** es una opción, pero el golden solo cubre MVT.
-11. **Ámbitos grandes y raros:** solo hay medidas hasta España. Probar un país grande (Estados Unidos), varios países a la vez y algo que cruce el antimeridiano, que el código no trata.
-12. **Golden, perfil y estilos en la CI:** confirmar que pasan y que los tests de estilos corren con el perfil compilado: sin él, `styles_compose_with_the_urls_of_the_bundle` sale sin comprobar nada.
-13. **Clientes sin gzip:** las teselas salen siempre con `Content-Encoding: gzip`, sin mirar qué acepta el cliente. Confirmar que los clientes reales lo soportan.
-14. **Si cae una fuente:** qué hace una actualización cuando osmdata no responde y ya hay datos anteriores. Solo se ha visto fallar en un build sin ellos.
-
-### Decisiones
-
-15. **«Por decidir» 6 y 3:** resolver las teselas de más de Planetiler, lo más caro del build y la mejora de eficiencia más clara que queda. El recorte al estilo se propone descartarlo: choca con que cualquier estilo pueda pintar las teselas.
-
-### Para abrir el servicio
-
-16. **Revisión legal y limpieza:** las licencias con un abogado (punto 26 del host, «Licencias»), borrar los worktrees ya fusionados, revisar `feature/tiles-demo` del host, quitar los restos de las pruebas y dejar el README y este plan al día.
+1. **Pull requests hasta `main`:** primero el host, porque `sdk-1` solo se mueve al llegar a `main`; después los módulos. Las versiones ya están subidas en las ramas (tiles `0.3.0`, geocoder `0.2.1`), así que llegar a `main` hace la release, la primera ejecución real del paso nuevo de `publish.yml`.
+2. **URLs absolutas por defecto:** el host da `Request::origin`, y el cambio de tiles espera en la rama local `feature/absolute-urls` porque no compila contra `sdk-1` hasta que el host llegue a `main`. Probado contra el SDK de la rama del host: 44 tests y la conformidad.
+3. **Modo operator en GitHub:** el secreto `GEKO_MODULES_TOKEN` y el workflow `operator` del host.
+4. **España en el clúster:** falta medirla. `kind` no está instalado aquí y el build necesita osmdata, caído el 2026-11-03 y el 2026-11-04.
+5. **Un disco lento:** la medida en frío es de un SSD local con Windows debajo. En un volumen de red las lecturas tardarán más y el efecto puede ser mayor. `--device-read-iops` no se puede aplicar a este volumen. Si se mide y molesta, probar `madvise` antes que el pool.
+6. **Ámbitos grandes y raros:** sin probar. `countries.toml` solo tiene `es`, así que Estados Unidos o varios países piden antes sus extractos. El código sigue sin tratar el antimeridiano, y `geo.rs` no lo avisa.
+7. **«Por decidir» 6 y 3:** las teselas de más de Planetiler siguen abiertas, y son la mejora de eficiencia más clara que queda. El recorte al estilo se propone descartarlo: choca con que cualquier estilo pueda pintar las teselas.
+8. **Claves en el panel:** el panel no envía API key, así que con `[serve] api_keys` no puede leer `/tiles/` ni guardar estilos. Hay que resolverlo en el host para usar `[styles] editable` como recomienda el README; hasta entonces, guardar con clave solo funciona por HTTP directo.
+9. **Revisión legal y limpieza:** las licencias con un abogado (punto 26 del host, «Licencias»), revisar los 2 commits de `feature/tiles-demo` del host, quitar los restos de las pruebas (volumen `geko-spain-bench`, `/var/lib/geko/tiles-bench`) y dejar el README y este plan al día.
 
 ## Licencias
 
@@ -254,6 +241,25 @@ El `planetiler.jar` oficial con el perfil parcheado («Entradas globales»), z14
 - **Contadores:** sin los dos contadores atómicos de cada tesela, 5,06 millones por segundo en vez de 4,86 (un 4 %, dentro del ruido): se quedan.
 - **Run-lengths en el índice:** no compensan. El índice de España ocupa 8,7 MB y la búsqueda no es lo que cuesta: el tiempo se va en copiar el cuerpo. El servicio queda muy por debajo de lo que tarda el HTTP del host.
 - Por HTTP, con el host: abajo («El servicio por HTTP»). Falta medirlo en frío con España.
+
+### El servicio en frío: España, 2026-11-04 (paso 9)
+
+Bundle de España hecho con la imagen: 565.277 teselas, 1.170 MB, 13 min 17 s (Planetiler, 786 s, con `--memory 10g` en el contenedor: el intento anterior lo paró el sistema). El cliente (`node`, 16 conexiones en 4 núcleos propios) pide teselas al azar con la caché de páginas vaciada, y otro pide una tesela en memoria a 200 peticiones/s; geko en 8 núcleos fijos. Hay ruido: en la misma máquina, el control en caliente dio un p99 de entre 1,6 y 10 ms según la tanda.
+
+| La tesela en memoria | p50 | p99 | p99,9 |
+|---|---|---|---|
+| Sola (3 tandas) | 0,76–0,87 ms | 4,5–5,7 ms | 9–24 ms |
+| Junto a lecturas en frío, `pool: false` | 0,99–1,07 ms | 7,8–11,1 ms | 28–66 ms |
+| Junto a lecturas en frío, `pool: true` | 0,88–0,94 ms | 7,3–7,7 ms | 21–39 ms |
+
+Las lecturas de disco sí retrasan las demás peticiones: el p99 casi se duplica. No se ha separado cuánto es de geko y cuánto de la máquina virtual, que comparte ese disco. El pool mejora esa cola en torno a un 20 %, pero en caliente, que es lo normal en cuanto la caché se llena, cuesta mucho más (`wrk`, 3 tandas alternas):
+
+| | 1 conexión, p50 | 64 conexiones, peticiones/s |
+|---|---|---|
+| `pool: false` | 124–130 µs | 81.000–93.000 |
+| `pool: true` | 187–211 µs | 31.000–34.000 |
+
+Se queda `pool: false`. Un estilo con clave, que se compone en cada petición, tarda 1,1 ms de punta a punta.
 
 ### El servicio por HTTP y las estadísticas: Baleares, 2026-11-03
 
