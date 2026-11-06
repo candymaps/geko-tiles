@@ -16,12 +16,22 @@ pub struct Config {
     pub url: String,
     pub osm: OsmConfig,
     pub planetiler: PlanetilerConfig,
+    pub styles: StylesConfig,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { format: Format::default(), url: "/tiles".into(), osm: OsmConfig::default(), planetiler: PlanetilerConfig::default() }
+        Self { format: Format::default(), url: "/tiles".into(), osm: OsmConfig::default(), planetiler: PlanetilerConfig::default(), styles: StylesConfig::default() }
     }
+}
+
+/// Who may change the styles of the user, never what they are: those are saved over HTTP.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StylesConfig {
+    /// Accept saving and deleting styles over HTTP. Off by default: without `[serve] api_keys` in
+    /// `geko.toml`, anyone who reaches geko could write them.
+    pub editable: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]

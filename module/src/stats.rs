@@ -1,7 +1,7 @@
 //! What the module has answered, for `stats.json`: requests, errors and time of every route, the
 //! tiles of each zoom level, the last hour minute by minute and the styles asked for. The host
 //! measures requests per route for `/metrics`, but a module cannot read it; these are its own
-//! counters, a few atomics per request and one short lock for the minute it falls in.
+//! counters, a few atomics per request, with no lock on the way of a tile.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -18,7 +18,7 @@ const SECONDS: usize = 60;
 const ZOOMS: usize = 32;
 
 /// The routes that are counted, as `Request::route` names them.
-const ROUTES: [&str; 6] = ["{z}/{x}/{y}", "tilejson.json", "styles.json", "styles/{flavor}/{lang}", "fonts/{fontstack}/{range}", "sprites/{name}"];
+const ROUTES: [&str; 7] = ["{z}/{x}/{y}", "tilejson.json", "styles.json", "styles/{flavor}/{lang}", "styles/custom/{name}", "fonts/{fontstack}/{range}", "sprites/{name}"];
 
 fn bucket(us: u64) -> usize {
     BOUNDS_US.iter().position(|&b| us <= b).unwrap_or(BOUNDS_US.len())
