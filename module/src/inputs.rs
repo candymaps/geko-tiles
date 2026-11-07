@@ -19,6 +19,22 @@ pub struct Pins {
     pub jre: Jre,
     pub natural_earth: NaturalEarth,
     pub assets: AssetsPin,
+    pub osmdata: Osmdata,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Osmdata {
+    pub base: String,
+    /// Asked in order when `base` does not answer.
+    pub mirrors: Vec<OsmdataMirror>,
+}
+
+/// A copy of the files of osmdata, under the same names.
+#[derive(Debug, Deserialize)]
+pub struct OsmdataMirror {
+    pub base: String,
+    /// By file: what is downloaded from here has to have them.
+    pub sha256: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -119,6 +135,8 @@ pub struct Input {
     pub file: String,
     pub url: String,
     pub sha256: Option<String>,
+    /// Where else to ask for the same file, in order, if `url` fails.
+    pub mirrors: Vec<DownloadRequest>,
     /// Without it the build goes on, and says so.
     pub optional: bool,
 }
@@ -186,6 +204,7 @@ pub fn inputs(pins: &Pins, qrank: bool) -> Result<Vec<Input>> {
         file: file.to_owned(),
         url: url.to_owned(),
         sha256: sha256.map(str::to_owned),
+        mirrors: Vec::new(),
         optional: false,
     };
     let mut list = Vec::new();
@@ -195,7 +214,13 @@ pub fn inputs(pins: &Pins, qrank: bool) -> Result<Vec<Input>> {
         list.push(input(Source::NaturalEarth, file, &url, Some(sha256)));
     }
     for name in [WATER, LAND] {
-        list.push(input(Source::Osmdata, &format!("{name}.zip"), &format!("https://osmdata.openstreetmap.de/download/{name}.zip"), None));
+        let file = format!("{name}.zip");
+        let url = format!("{}/{file}", pins.osmdata.base.trim_end_matches('/'));
+        let mirror = |m: &OsmdataMirror| DownloadRequest {
+            url: format!("{}/{file}", m.base.trim_end_matches('/')),
+            checksum: m.sha256.get(&file).cloned().map(Checksum::Sha256),
+        };
+        list.push(Input { mirrors: pins.osmdata.mirrors.iter().map(mirror).collect(), ..input(Source::Osmdata, &file, &url, None) });
     }
     list.push(input(Source::Daylight, "daylight-landcover.gpkg", "https://r2-public.protomaps.com/datasets/daylight-landcover.gpkg", None));
     list.push(input(Source::PgfEncoding, "pgf-encoding.zip", "https://wipfli.github.io/pgf-encoding/pgf-encoding.zip", None));
@@ -232,6 +257,28 @@ mod tests {
         for (path, sha) in pins.natural_earth.sha256.iter().chain(pins.jre.platforms.values().map(|p| (&p.url, &p.sha256))) {
             assert!(sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit()), "{path}");
         }
+    }
+
+    #[test]
+    fn every_mirror_of_osmdata_is_pinned() {
+        let pins = pins();
+        assert!(!pins.osmdata.mirrors.is_empty());
+        for mirror in &pins.osmdata.mirrors {
+            for name in [WATER, LAND] {
+                let sha = &mirror.sha256[&format!("{name}.zip")];
+                assert!(sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit()), "{}", mirror.base);
+            }
+        }
+        if !pins.jre.platforms.contains_key(&platform()) {
+            return;
+        }
+        let list = inputs(&pins, false).unwrap();
+        let water = list.iter().find(|i| i.file == "water-polygons-split-3857.zip").unwrap();
+        assert_eq!(water.url, "https://osmdata.openstreetmap.de/download/water-polygons-split-3857.zip");
+        assert!(water.sha256.is_none(), "osmdata changes it almost every day");
+        assert_eq!(water.mirrors.len(), pins.osmdata.mirrors.len());
+        assert!(water.mirrors.iter().all(|m| m.url.ends_with("/water-polygons-split-3857.zip") && matches!(m.checksum, Some(Checksum::Sha256(_)))));
+        assert!(list.iter().filter(|i| i.source != Source::Osmdata).all(|i| i.mirrors.is_empty()));
     }
 
     #[test]
