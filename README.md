@@ -62,6 +62,8 @@ editable = false      # accept saving and deleting your own styles over HTTP: tu
 
 Downloading requires `[data] accept_licenses = true` in `geko.toml`, as for every module. Besides OSM and the inputs of Planetiler, it downloads the fonts (Noto Sans, OFL) and sprites (icons of Tangram, MIT) of the styles, from [protomaps/basemaps-assets](https://github.com/protomaps/basemaps-assets) at a fixed commit. Planetiler's memory, threads and storage change how fast the build runs and how much memory it takes, never the tiles.
 
+If [osmdata](https://osmdata.openstreetmap.de) does not answer, the build keeps the water and land polygons it has and, without them, downloads the copy pinned in `planetiler/profile.toml` from an archive, checked by its sha256. That copy is older than what osmdata publishes, and the report of the build says so. The next build that reaches osmdata asks it for changes, as usual.
+
 ### Your own styles
 
 Besides the styles of Protomaps, any MapLibre style can paint the tiles. With `[styles] editable = true`, the dashboard (Tiles, Styles) saves them, or `POST /tiles/styles/custom/<name>/save` with the JSON as its body; `POST /tiles/styles/custom/<name>/delete` deletes one. They are served at `/tiles/styles/custom/<name>.json` and listed in `/tiles/styles.json`. A change needs no build, and every replica answers it at once.

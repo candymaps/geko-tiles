@@ -35,6 +35,21 @@ repository = "https://github.com/protomaps/basemaps-assets"
 commit     = "028c18f713baecad011301ff7a69acc39bcc2ae7"
 base       = "https://raw.githubusercontent.com/protomaps/basemaps-assets/028c18f713baecad011301ff7a69acc39bcc2ae7"
 
+# The water and land polygons (docs/MODULE_PLAN.md, «Entradas globales»). osmdata changes them almost
+# every day, so they have no sha256; it is the only source without another way of getting its files.
+# When it does not answer, and there is no copy to keep, they come from a mirror, which has to give
+# the bytes of osmdata: only a dated folder of an archive, which does not change, checked by its
+# sha256. They are older than what osmdata has, until osmdata answers again.
+[osmdata]
+base = "https://osmdata.openstreetmap.de/download"
+
+[[osmdata.mirrors]]
+base = "https://ftp.fau.de/mirrors/openstreetmapdata.com-archive/2026-10-31"
+
+[osmdata.mirrors.sha256]
+"water-polygons-split-3857.zip" = "99619ac05f2d19771d522c868232b2a0373b86925d2c60fed9173bd31b7658e2"
+"land-polygons-split-3857.zip"  = "9160459d6cd828112d98a0821aa4284039f9f159b4147c4dd144f9963c9306fd"
+
 # The layers of Natural Earth that the profile reads (patch 0001), as shapefiles from the repository of
 # Natural Earth at the tag of its version: the files of each layer, by their path under `base`.
 [natural_earth]
