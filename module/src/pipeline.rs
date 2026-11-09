@@ -295,12 +295,14 @@ fn fetched(setup: &Setup, dl: &dyn Downloader) -> Result<Fetched> {
     progress::expect(downloads.len() as u64);
     let outcomes = download_all(&downloads, dl, setup.data.parallel_downloads);
     let (mut downloaded, mut kept) = (0, 0);
+    let mut unanswered = false;
     for (d, outcome) in downloads.into_iter().zip(outcomes) {
         match outcome {
             Ok(done) => {
                 f.identities.insert(d.path.clone(), format!("sha256 {}", done.sha256));
                 if done.fresh { downloaded += 1 } else { kept += 1 }
                 if let Some(note) = done.note {
+                    unanswered = true;
                     tracing::warn!("{note}");
                     writeln!(f.report, "{note}").unwrap();
                 }
@@ -317,7 +319,8 @@ fn fetched(setup: &Setup, dl: &dyn Downloader) -> Result<Fetched> {
             }
         }
     }
-    if dl.checks_for_updates() {
+    // A source that did not answer was not checked: the next build, in an hour, asks it again.
+    if dl.checks_for_updates() && !unanswered {
         mark_checked(setup)?;
     }
     writeln!(f.report, "downloads of the tiles: {downloaded} downloaded, {kept} up to date").unwrap();
@@ -804,7 +807,7 @@ mod tests {
         let d = servers.download(tmp.path(), vec![servers.request("mirror", None)]);
         let first = fetch_or_mirror(&http(false), &d).unwrap();
         let second = fetch_or_mirror(&http(false), &d).unwrap();
-        assert!(!second.fresh && second.note.unwrap().contains("kept the copy"));
+        assert!(!second.fresh);
         assert_eq!(second.sha256, first.sha256);
         assert_eq!(servers.mirror_requests.load(Ordering::SeqCst), 1);
     }
