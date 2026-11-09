@@ -174,6 +174,32 @@ pub fn parse_directory(b: &[u8]) -> Result<Vec<Entry>> {
     Ok(entries)
 }
 
+fn push(out: &mut Vec<u8>, mut v: u64) {
+    while v >= 0x80 {
+        out.push((v as u8) | 0x80);
+        v >>= 7;
+    }
+    out.push(v as u8);
+}
+
+/// The bytes of a directory of `entries`, in order of tile id, before compressing them.
+pub fn directory(entries: &[Entry]) -> Vec<u8> {
+    let mut out = Vec::new();
+    push(&mut out, entries.len() as u64);
+    let mut last = 0;
+    for e in entries {
+        push(&mut out, e.tile_id - last);
+        last = e.tile_id;
+    }
+    entries.iter().for_each(|e| push(&mut out, u64::from(e.run)));
+    entries.iter().for_each(|e| push(&mut out, u64::from(e.len)));
+    for (i, e) in entries.iter().enumerate() {
+        let next = i > 0 && e.offset == entries[i - 1].offset + u64::from(entries[i - 1].len);
+        push(&mut out, if next { 0 } else { e.offset + 1 });
+    }
+    out
+}
+
 fn rotate(n: u64, x: &mut u64, y: &mut u64, rx: u64, ry: u64) {
     if ry == 0 {
         if rx == 1 {
@@ -245,35 +271,10 @@ pub mod tests {
         }
     }
 
-    fn push(out: &mut Vec<u8>, mut v: u64) {
-        while v >= 0x80 {
-            out.push((v as u8) | 0x80);
-            v >>= 7;
-        }
-        out.push(v as u8);
-    }
-
     fn gzip(b: &[u8]) -> Vec<u8> {
         let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         e.write_all(b).unwrap();
         e.finish().unwrap()
-    }
-
-    pub fn directory(entries: &[Entry]) -> Vec<u8> {
-        let mut out = Vec::new();
-        push(&mut out, entries.len() as u64);
-        let mut last = 0;
-        for e in entries {
-            push(&mut out, e.tile_id - last);
-            last = e.tile_id;
-        }
-        entries.iter().for_each(|e| push(&mut out, u64::from(e.run)));
-        entries.iter().for_each(|e| push(&mut out, u64::from(e.len)));
-        for (i, e) in entries.iter().enumerate() {
-            let next = i > 0 && e.offset == entries[i - 1].offset + u64::from(entries[i - 1].len);
-            push(&mut out, if next { 0 } else { e.offset + 1 });
-        }
-        out
     }
 
     /// A PMTiles of `tiles` (id, content), in that order, with one leaf directory for those from

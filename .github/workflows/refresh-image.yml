@@ -1,0 +1,31 @@
+# The image of the operator mode with the newest geko («Una imagen por módulo», in the host). The
+# image carries the host, and a change of the host alone publishes nothing here: once a day this
+# compares the image of geko with the one in `latest` and, if it is another, makes the image again
+# from the same package, compiling nothing. A host of another contract does not load the module, and
+# the image stays as it was. Without a `latest` yet (no release since the images), it does nothing.
+name: refresh-image
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: github.repository == 'candymaps/geko-tiles'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: ci/modules.sh refresh-image

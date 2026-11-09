@@ -55,9 +55,32 @@ memory = "4g"         # heap of the Java process (-Xmx)
 threads = 0           # 0: one per core
 storage = "mmap"      # or "ram": where Planetiler keeps its temporary data
 qrank = true          # download QRank to order places and POIs; the build goes on without it
+
+[styles]
+editable = false      # accept saving and deleting your own styles over HTTP: turn it on only with [serve] api_keys in geko.toml
 ```
 
 Downloading requires `[data] accept_licenses = true` in `geko.toml`, as for every module. Besides OSM and the inputs of Planetiler, it downloads the fonts (Noto Sans, OFL) and sprites (icons of Tangram, MIT) of the styles, from [protomaps/basemaps-assets](https://github.com/protomaps/basemaps-assets) at a fixed commit. Planetiler's memory, threads and storage change how fast the build runs and how much memory it takes, never the tiles.
+
+If [osmdata](https://osmdata.openstreetmap.de) does not answer, the build keeps the water and land polygons it has and, without them, downloads the copy pinned in `planetiler/profile.toml` from an archive, checked by its sha256. That copy is older than what osmdata publishes, and the report of the build says so. The next build that reaches osmdata asks it for changes, as usual.
+
+### Your own styles
+
+Besides the styles of Protomaps, any MapLibre style can paint the tiles. With `[styles] editable = true`, the dashboard (Tiles, Styles) saves them, or `POST /tiles/styles/custom/<name>/save` with the JSON as its body; `POST /tiles/styles/custom/<name>/delete` deletes one. They are served at `/tiles/styles/custom/<name>.json` and listed in `/tiles/styles.json`. A change needs no build, and every replica answers it at once.
+
+The source `protomaps` of a style is always the tiles of the bundle in use. Without `glyphs` or `sprite`, it gets the fonts and the sprites of the bundle; with them, its own, served from wherever they point. geko checks that a client can load the style and that its layers name sources it has, not the values of paint and layout.
+
+### API keys
+
+With `[serve] api_keys` in `geko.toml`, ask for a style or for `tilejson.json` with `?api_key=<key>`: every URL in the answer carries that key, so that the map can load the tiles, fonts and sprites.
+
+### Compression
+
+Tiles, fonts and the styles of Protomaps are sent as stored, with `Content-Encoding: gzip`, whatever the client asks: browsers and map libraries read them as they are, and with `curl` use `--compressed`.
+
+### PMTiles
+
+`geko tiles export <file.pmtiles>` writes the tiles of the current bundle to one PMTiles archive, to serve them with something else.
 
 ## License
 

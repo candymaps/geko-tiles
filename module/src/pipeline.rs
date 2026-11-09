@@ -202,6 +202,8 @@ fn catalog(setup: &Setup, dl: &dyn Downloader) -> Result<Catalog> {
 struct Download {
     path: PathBuf,
     request: DownloadRequest,
+    /// Where else the same file can be asked for, in order, if its source fails.
+    mirrors: Vec<DownloadRequest>,
     optional: bool,
     source: Option<Source>,
 }
@@ -211,7 +213,7 @@ struct Download {
 struct Fetched {
     report: String,
     identities: BTreeMap<PathBuf, String>,
-    requests: BTreeMap<PathBuf, DownloadRequest>,
+    downloads: BTreeMap<PathBuf, Download>,
     extracts: Vec<PathBuf>,
     missing_optional: Vec<Source>,
 }
@@ -219,7 +221,7 @@ struct Fetched {
 fn global_downloads(setup: &Setup, pins: &Pins) -> Result<Vec<Download>> {
     Ok(inputs::inputs(pins, setup.config.planetiler.qrank)?
         .into_iter()
-        .map(|i: Input| Download { path: i.path(&setup.data_dir), request: i.request(), optional: i.optional, source: Some(i.source) })
+        .map(|i: Input| Download { path: i.path(&setup.data_dir), request: i.request(), mirrors: i.mirrors.clone(), optional: i.optional, source: Some(i.source) })
         .collect())
 }
 
@@ -287,18 +289,24 @@ fn fetched(setup: &Setup, dl: &dyn Downloader) -> Result<Fetched> {
             .ok_or_else(|| GekoError::Data(format!("empty checksum file {}", md5_path.display())))?;
         let path = setup.osm_dir().join(&file);
         f.extracts.push(path.clone());
-        downloads.push(Download { path, request: DownloadRequest { url, checksum: Some(Checksum::Md5(md5)) }, optional: false, source: None });
+        downloads.push(Download { path, request: DownloadRequest { url, checksum: Some(Checksum::Md5(md5)) }, mirrors: Vec::new(), optional: false, source: None });
     }
     downloads.extend(global_downloads(setup, &inputs::pins())?);
     progress::expect(downloads.len() as u64);
     let outcomes = download_all(&downloads, dl, setup.data.parallel_downloads);
     let (mut downloaded, mut kept) = (0, 0);
+    let mut unanswered = false;
     for (d, outcome) in downloads.into_iter().zip(outcomes) {
         match outcome {
-            Ok((sha256, fresh)) => {
-                f.identities.insert(d.path.clone(), format!("sha256 {sha256}"));
-                if fresh { downloaded += 1 } else { kept += 1 }
-                f.requests.insert(d.path, d.request);
+            Ok(done) => {
+                f.identities.insert(d.path.clone(), format!("sha256 {}", done.sha256));
+                if done.fresh { downloaded += 1 } else { kept += 1 }
+                if let Some(note) = done.note {
+                    unanswered = true;
+                    tracing::warn!("{note}");
+                    writeln!(f.report, "{note}").unwrap();
+                }
+                f.downloads.insert(d.path.clone(), d);
             }
             Err(e) if d.optional => {
                 tracing::warn!(url = %d.request.url, "{e}; the tiles are built without it");
@@ -311,15 +319,21 @@ fn fetched(setup: &Setup, dl: &dyn Downloader) -> Result<Fetched> {
             }
         }
     }
-    if dl.checks_for_updates() {
+    // A source that did not answer was not checked: the next build, in an hour, asks it again.
+    if dl.checks_for_updates() && !unanswered {
         mark_checked(setup)?;
     }
     writeln!(f.report, "downloads of the tiles: {downloaded} downloaded, {kept} up to date").unwrap();
     Ok(f)
 }
 
-/// The sha256 of a download, and whether it was downloaded now.
-type Downloaded = (String, bool);
+/// The sha256 of a download, whether it was downloaded now, and what the report has to say if its
+/// source did not answer.
+struct Downloaded {
+    sha256: String,
+    fresh: bool,
+    note: Option<String>,
+}
 
 /// Every download, `parallel` at a time (`[data] parallel_downloads`): the sha256 of each one and
 /// whether it was downloaded now, in the order of `downloads`. One after another, the thousand
@@ -334,8 +348,8 @@ fn download_all(downloads: &[Download], dl: &dyn Downloader, parallel: usize) ->
                     let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let Some(d) = downloads.get(i) else { break };
                     let result = match pinned_and_recorded(dl, d) {
-                        Some(sha256) => Ok((sha256, false)),
-                        None => dl.fetch(&d.request, &d.path).map(|o| (o.sha256, o.downloaded)),
+                        Some(sha256) => Ok(Downloaded { sha256, fresh: false, note: None }),
+                        None => fetch_or_mirror(dl, d),
                     };
                     progress::advance(1);
                     results.lock().unwrap_or_else(|e| e.into_inner())[i] = Some(result);
@@ -351,12 +365,62 @@ fn download_all(downloads: &[Download], dl: &dyn Downloader, parallel: usize) ->
 /// not asked again. Without it, every check would ask for each of the thousand fonts and sprites.
 fn pinned_and_recorded(dl: &dyn Downloader, d: &Download) -> Option<String> {
     let Some(Checksum::Sha256(pin)) = &d.request.checksum else { return None };
+    recorded(dl, d).filter(|r| r.sha256.eq_ignore_ascii_case(pin)).map(|r| r.sha256)
+}
+
+/// The record of a download that is there, or was removed after publishing if the downloader keeps
+/// those.
+fn recorded(dl: &dyn Downloader, d: &Download) -> Option<geko_fetch::RawRecord> {
     if !d.path.is_file() && !dl.keeps_removed() {
         return None;
     }
     let record: geko_fetch::RawRecord = serde_json::from_slice(&fs::read(geko_fetch::sidecar(&d.path)).ok()?).ok()?;
     let size_ok = fs::metadata(&d.path).map_or(true, |m| m.len() == record.size);
-    (record.url == d.request.url && record.sha256.eq_ignore_ascii_case(pin) && size_ok).then_some(record.sha256)
+    (record.url == d.request.url && size_ok).then_some(record)
+}
+
+/// A download from its source or, if the source fails and there is no copy to keep, from the first
+/// mirror that has it (docs/MODULE_PLAN.md, «Entradas globales»). A copy wins over a mirror: a mirror
+/// may be older, and nearly 1 GB would be downloaded to go backwards. Only what the network answers
+/// falls back: an error of the disk would fail on a mirror too.
+fn fetch_or_mirror(dl: &dyn Downloader, d: &Download) -> Result<Downloaded> {
+    let failure = match dl.fetch(&d.request, &d.path) {
+        Ok(o) => return Ok(Downloaded { sha256: o.sha256, fresh: o.downloaded, note: None }),
+        Err(e @ GekoError::Data(_)) if !d.mirrors.is_empty() => e,
+        Err(e) => return Err(e),
+    };
+    if let Some(record) = recorded(dl, d) {
+        let note = format!("{} did not answer: kept the copy there is ({failure})", d.request.url);
+        return Ok(Downloaded { sha256: record.sha256, fresh: false, note: Some(note) });
+    }
+    for mirror in &d.mirrors {
+        match dl.fetch(mirror, &d.path) {
+            Ok(o) => {
+                record_as_from_source(d)?;
+                let note = format!("{} did not answer: downloaded from {} ({failure})", d.request.url, mirror.url);
+                return Ok(Downloaded { sha256: o.sha256, fresh: o.downloaded, note: Some(note) });
+            }
+            Err(e) => tracing::warn!(url = %mirror.url, "{e}; trying the next mirror"),
+        }
+    }
+    Err(failure)
+}
+
+/// Makes the record of a file from a mirror name its source, for the downloader only knows a copy by
+/// the URL it is asked for: else, with `offline` the file would be missing, and when the source is
+/// back it would be downloaded again. The `Last-Modified` stays, since the mirrors keep the one of the
+/// source, which answers it with a 304 if the file is the same. The `ETag` goes: it is the mirror's
+/// own, and the source would take it for a change.
+fn record_as_from_source(d: &Download) -> Result<()> {
+    let path = geko_fetch::sidecar(&d.path);
+    let invalid = |e: serde_json::Error| GekoError::Data(format!("{}: {e}", path.display()));
+    let mut record: geko_fetch::RawRecord = serde_json::from_slice(&fs::read(&path)?).map_err(invalid)?;
+    record.url.clone_from(&d.request.url);
+    record.etag = None;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, serde_json::to_vec_pretty(&record).map_err(invalid)?)?;
+    fs::rename(&tmp, &path)?;
+    Ok(())
 }
 
 /// Brings back the downloads of `paths` removed after publishing, for a stage that reads them.
@@ -366,8 +430,8 @@ fn restore(setup: &Setup, fetched: &Fetched, paths: &[&Path]) -> Result<()> {
         if path.exists() {
             continue;
         }
-        let request = fetched.requests.get(*path).ok_or_else(|| GekoError::Data(format!("{} is missing", path.display())))?;
-        restorer.fetch(request, path)?;
+        let download = fetched.downloads.get(*path).ok_or_else(|| GekoError::Data(format!("{} is missing", path.display())))?;
+        fetch_or_mirror(&restorer, download)?;
     }
     Ok(())
 }
@@ -643,6 +707,9 @@ pub fn purge(setup: &Setup) -> Result<String> {
 mod tests {
     use super::*;
     use geko_module_sdk::country::{CountryCode, RegionCode};
+    use std::io::{Read, Write};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     fn setup(data: DataPolicy, dir: &Path) -> Setup {
         let mut scope = Scope::default();
@@ -656,6 +723,125 @@ mod tests {
         fn fetch(&self, req: &DownloadRequest, _: &Path) -> Result<geko_module_sdk::download::DownloadOutcome> {
             Err(GekoError::Data(format!("no network: {}", req.url)))
         }
+    }
+
+    const LAST_MODIFIED: &str = "Sat, 31 Oct 2026 03:48:42 GMT";
+
+    /// A source that answers 503 while `down`, or as a server of static files, a mirror with a file
+    /// of the same date and an `ETag` of its own, and a path that is not there.
+    struct Servers {
+        base: String,
+        down: Arc<AtomicBool>,
+        mirror_requests: Arc<AtomicUsize>,
+        source_downloads: Arc<AtomicUsize>,
+    }
+
+    impl Servers {
+        fn start() -> Self {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let (down, mirror_requests, source_downloads) = (Arc::new(AtomicBool::new(true)), Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+            let (is_down, mirror, source) = (down.clone(), mirror_requests.clone(), source_downloads.clone());
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let mut stream = stream.unwrap();
+                    let mut buf = [0; 4096];
+                    let n = stream.read(&mut buf).unwrap_or(0);
+                    let asked = String::from_utf8_lossy(&buf[..n]).to_lowercase();
+                    let file = |etag: &str| format!("HTTP/1.1 200 OK\r\nETag: \"{etag}\"\r\nLast-Modified: {LAST_MODIFIED}\r\nContent-Length: 8\r\nConnection: close\r\n\r\npolygons");
+                    let status = |line: &str| format!("HTTP/1.1 {line}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    let answer = if asked.starts_with("get /mirror") {
+                        mirror.fetch_add(1, Ordering::SeqCst);
+                        file("mirror")
+                    } else if asked.starts_with("get /gone") {
+                        status("404 Not Found")
+                    } else if is_down.load(Ordering::SeqCst) {
+                        status("503 Service Unavailable")
+                    } else if asked.contains(&LAST_MODIFIED.to_lowercase()) && !asked.contains("if-none-match") {
+                        status("304 Not Modified")
+                    } else {
+                        source.fetch_add(1, Ordering::SeqCst);
+                        file("source")
+                    };
+                    let _ = stream.write_all(answer.as_bytes());
+                }
+            });
+            Self { base, down, mirror_requests, source_downloads }
+        }
+
+        fn request(&self, path: &str, sha256: Option<&str>) -> DownloadRequest {
+            DownloadRequest { url: format!("{}/{path}", self.base), checksum: sha256.map(|s| Checksum::Sha256(s.to_owned())) }
+        }
+
+        fn download(&self, dir: &Path, mirrors: Vec<DownloadRequest>) -> Download {
+            Download { path: dir.join("x.zip"), request: self.request("source", None), mirrors, optional: false, source: None }
+        }
+    }
+
+    fn http(offline: bool) -> HttpDownloader {
+        HttpDownloader::new(HttpDownloaderConfig { offline, attempts: 1, ..Default::default() })
+    }
+
+    #[test]
+    fn what_comes_from_a_mirror_is_known_by_its_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let servers = Servers::start();
+        let d = servers.download(tmp.path(), vec![servers.request("mirror", None)]);
+        let done = fetch_or_mirror(&http(false), &d).unwrap();
+        assert!(done.fresh && done.note.unwrap().contains("/mirror"));
+        assert_eq!(fs::read(&d.path).unwrap(), b"polygons");
+        let record: geko_fetch::RawRecord = serde_json::from_slice(&fs::read(geko_fetch::sidecar(&d.path)).unwrap()).unwrap();
+        assert_eq!((record.url.as_str(), record.etag, record.last_modified.as_deref()), (d.request.url.as_str(), None, Some(LAST_MODIFIED)));
+        assert!(!http(true).fetch(&d.request, &d.path).unwrap().downloaded, "offline, the copy is there");
+        // The source is back, with the same file: nothing is downloaded again.
+        servers.down.store(false, Ordering::SeqCst);
+        let back = fetch_or_mirror(&http(false), &d).unwrap();
+        assert!(!back.fresh && back.note.is_none());
+        assert_eq!(servers.source_downloads.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn a_copy_is_kept_rather_than_downloaded_from_a_mirror() {
+        let tmp = tempfile::tempdir().unwrap();
+        let servers = Servers::start();
+        let d = servers.download(tmp.path(), vec![servers.request("mirror", None)]);
+        let first = fetch_or_mirror(&http(false), &d).unwrap();
+        let second = fetch_or_mirror(&http(false), &d).unwrap();
+        assert!(!second.fresh);
+        assert_eq!(second.sha256, first.sha256);
+        assert_eq!(servers.mirror_requests.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_mirror_with_other_bytes_than_its_pin_is_not_taken() {
+        let tmp = tempfile::tempdir().unwrap();
+        let servers = Servers::start();
+        let d = servers.download(tmp.path(), vec![servers.request("mirror", Some(&"0".repeat(64)))]);
+        let err = fetch_or_mirror(&http(false), &d).err().unwrap().to_string();
+        assert!(err.contains("/source"), "{err}");
+        assert!(!d.path.exists());
+    }
+
+    #[test]
+    fn the_mirrors_are_tried_in_order_and_the_error_is_the_one_of_the_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let servers = Servers::start();
+        let d = servers.download(tmp.path(), vec![servers.request("gone", None), servers.request("mirror", None), servers.request("mirror", None)]);
+        assert!(fetch_or_mirror(&http(false), &d).unwrap().note.unwrap().contains("/mirror"));
+        assert_eq!(servers.mirror_requests.load(Ordering::SeqCst), 1);
+        let d = Download { path: tmp.path().join("y.zip"), ..servers.download(tmp.path(), vec![servers.request("gone", None)]) };
+        let err = fetch_or_mirror(&http(false), &d).err().unwrap().to_string();
+        assert!(err.contains("/source") && err.contains("503"), "{err}");
+    }
+
+    #[test]
+    fn offline_no_mirror_is_asked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let servers = Servers::start();
+        let d = servers.download(tmp.path(), vec![servers.request("mirror", None)]);
+        let err = fetch_or_mirror(&http(true), &d).err().unwrap().to_string();
+        assert!(err.contains("offline mode"), "{err}");
+        assert_eq!(servers.mirror_requests.load(Ordering::SeqCst), 0);
     }
 
     #[test]

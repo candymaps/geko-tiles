@@ -10,7 +10,8 @@
 #                 (cargo-deny)
 #   contracts     unit tests and the conformance suite of the module contract
 #   profile       the Planetiler profile: planetiler/patches/ apply to the Protomaps commit of
-#                 planetiler/profile.toml and it compiles (ci/profile.sh, in Docker)
+#                 planetiler/profile.toml and it compiles (ci/profile.sh, in Docker), and the tests
+#                 of the styles pass with the layers it generates
 #   golden        builds the tiles of Baleares on the frozen data named in golden/snapshot and fails
 #                 if they are not, byte for byte, those of golden/baseline.json (where they differ:
 #                 by zoom, the tiles of a few places, the metadata, the fonts and sprites). It needs
@@ -178,6 +179,9 @@ if wants code; then
 fi
 wants contracts && run test test
 wants profile && run profile ci/profile.sh "${CARGO_TARGET_DIR:-target}/profile/out"
+# The tests of the styles again with the layers compiled in: without the profile, they have none.
+wants profile && run styles env GEKO_TILES_PROFILE="$(realpath -m "${CARGO_TARGET_DIR:-target}/profile/out/protomaps-basemap.jar")" \
+    cargo test --locked -p geko-module-tiles style
 wants golden && run golden golden
 if [ ${#FAILED[@]} -gt 0 ]; then
     echo "failed: ${FAILED[*]}" >&2
