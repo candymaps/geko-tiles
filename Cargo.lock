@@ -228,7 +228,7 @@ dependencies = [
 [[package]]
 name = "geko-fetch"
 version = "2.0.0"
-source = "git+https://github.com/candymaps/geko.git?rev=b26ea76afa13475be96e74f6bc9dbb420bcf07d5#b26ea76afa13475be96e74f6bc9dbb420bcf07d5"
+source = "git+https://github.com/candymaps/geko.git?tag=sdk-v2.0.0#260e73040380446faddff5a43bc622d5b98543f2"
 dependencies = [
  "geko-module-sdk",
  "hex",
@@ -243,7 +243,7 @@ dependencies = [
 [[package]]
 name = "geko-module-sdk"
 version = "2.0.0"
-source = "git+https://github.com/candymaps/geko.git?rev=b26ea76afa13475be96e74f6bc9dbb420bcf07d5#b26ea76afa13475be96e74f6bc9dbb420bcf07d5"
+source = "git+https://github.com/candymaps/geko.git?tag=sdk-v2.0.0#260e73040380446faddff5a43bc622d5b98543f2"
 dependencies = [
  "hex",
  "serde",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "geko-module-tiles"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "arc-swap",
  "flate2",
@@ -275,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "geko-module-tiles-dylib"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "geko-module-sdk",
  "geko-module-tiles",
