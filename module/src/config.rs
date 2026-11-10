@@ -11,8 +11,8 @@ pub struct Config {
     /// `mvt`, which every client reads, or `mlt`, about 10 % smaller, which only MapLibre GL JS
     /// 5.12 and later reads (docs/MODULE_PLAN.md, «Formato de las teselas»).
     pub format: Format,
-    /// Where clients fetch the tiles, as `tilejson.json` writes it: `/tiles`, on the host that
-    /// answered, or an absolute URL (a CDN in front of geko, a prefix of a reverse proxy).
+    /// Where clients fetch the tiles: `/tiles`, under the host each request reached, or an absolute
+    /// URL (a CDN in front of geko, a prefix of a reverse proxy).
     pub url: String,
     pub osm: OsmConfig,
     pub planetiler: PlanetilerConfig,

@@ -3,6 +3,7 @@
 //! index, pinned in RAM, and a copy of its bytes from `tiles.bin`, mapped: nothing is decoded or
 //! compressed, and the body is the only allocation. The styles, fonts and sprites are in `styles`.
 
+use std::borrow::Cow;
 use std::fmt::Write;
 use std::fs::{self, File};
 use std::path::Path;
@@ -61,7 +62,8 @@ struct Counters {
 }
 
 pub struct Server {
-    /// Where clients fetch the tiles, as `tilejson.json` writes it (`geko-tiles.toml`, `url`).
+    /// Where clients fetch the tiles (`geko-tiles.toml`, `url`): relative, under the origin of each
+    /// request, because a client cannot load a style or a TileJSON with relative URLs.
     url: String,
     loaded: ArcSwapOption<Loaded>,
     counters: Counters,
@@ -139,6 +141,7 @@ impl Server {
             _ => {}
         }
         let param = |name: &str| request.params.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str()).unwrap_or_default();
+        let base = self.base(request);
         match request.route.as_str() {
             "styles/custom/{name}/save" => return self.save(param("name"), &request.body).with_header("Cache-Control", REVALIDATE),
             "styles/custom/{name}/delete" => return self.delete(param("name")).with_header("Cache-Control", REVALIDATE),
@@ -146,11 +149,11 @@ impl Server {
         }
         let response = match (&*loaded, request.route.as_str()) {
             (None, _) => Response::error(503, "no tiles bundle loaded"),
-            (Some(l), "tilejson.json") => Response::new(200, "application/json", keyed_tilejson(l, &self.url, api_key(request))).with_header("Cache-Control", REVALIDATE),
+            (Some(l), "tilejson.json") => Response::new(200, "application/json", self.tilejson(l, &base, api_key(request))).with_header("Cache-Control", REVALIDATE),
             (Some(l), "{z}/{x}/{y}") => self.tile(l, request),
-            (Some(_), "styles.json") => self.catalog(),
-            (Some(l), "styles/{flavor}/{lang}") => self.style(l, param("flavor"), param("lang"), api_key(request)),
-            (Some(l), "styles/custom/{name}") => self.custom_style(l, param("name"), api_key(request)),
+            (Some(_), "styles.json") => self.catalog(&base),
+            (Some(l), "styles/{flavor}/{lang}") => self.style(l, param("flavor"), param("lang"), &base, api_key(request)),
+            (Some(l), "styles/custom/{name}") => self.custom_style(l, param("name"), &base, api_key(request)),
             (Some(l), "fonts/{fontstack}/{range}") => {
                 let range = param("range");
                 let range = range.strip_suffix(".pbf").unwrap_or(range);
@@ -245,24 +248,38 @@ impl Server {
     }
 
     /// `styles.json`: the styles there are, and the URL of each one.
-    fn catalog(&self) -> Response {
+    fn catalog(&self, base: &str) -> Response {
         let (flavors, langs) = styles::catalog();
         let body = json!({
             "flavors": flavors,
             "languages": langs,
-            "style": format!("{}/styles/{{flavor}}/{{lang}}.json", self.url),
+            "style": format!("{base}/styles/{{flavor}}/{{lang}}.json"),
             "custom": self.custom.list(),
-            "custom_style": format!("{}/styles/custom/{{name}}.json", self.url),
+            "custom_style": format!("{base}/styles/custom/{{name}}.json"),
             "editable": self.custom.editable(),
         });
         Response::new(200, "application/json", serde_json::to_vec(&body).expect("JSON values serialize")).with_header("Cache-Control", REVALIDATE)
     }
 
-    fn urls<'a>(&'a self, l: &'a Loaded, key: Option<&'a str>) -> Urls<'a> {
-        Urls { url: &self.url, version: &l.version, tile_type: &l.tile_type, key }
+    /// Where the URLs of the answer to `request` point.
+    fn base(&self, request: &Request) -> Cow<'_, str> {
+        match &request.origin {
+            Some(origin) if self.url.starts_with('/') => Cow::Owned(format!("{origin}{}", self.url)),
+            _ => Cow::Borrowed(&self.url),
+        }
     }
 
-    fn style(&self, l: &Loaded, flavor: &str, lang: &str, key: Option<&str>) -> Response {
+    /// The TileJSON of a bundle, as it was loaded unless the request changes its URLs.
+    fn tilejson(&self, l: &Loaded, base: &str, key: Option<&str>) -> Vec<u8> {
+        if key.is_none() && base == self.url {
+            return l.tilejson.clone();
+        }
+        let mut tilejson: serde_json::Value = serde_json::from_slice(&l.tilejson).expect("the module wrote it");
+        tilejson["tiles"] = json!([urls(l, base, key).tiles()]);
+        serde_json::to_vec(&tilejson).expect("JSON values serialize")
+    }
+
+    fn style(&self, l: &Loaded, flavor: &str, lang: &str, base: &str, key: Option<&str>) -> Response {
         let lang = lang.strip_suffix(".json").unwrap_or(lang);
         let Some(i) = styles::find(flavor, lang) else {
             return Response::error(404, &format!("no style {flavor}/{lang}: styles.json lists them"));
@@ -271,12 +288,12 @@ impl Server {
             return Response::error(503, "this bundle has no fonts or sprites: build it again");
         }
         self.stats.style(flavor, lang);
-        let body = l.styles.get(i, &self.urls(l, key)).into_owned();
+        let body = l.styles.get(i, &urls(l, base, key), base == self.url).into_owned();
         Response::new(200, "application/json", body).with_header("Content-Encoding", "gzip").with_header("Cache-Control", REVALIDATE)
     }
 
     /// A style of the user: `name` may end in `.json`, as those of Protomaps.
-    fn custom_style(&self, l: &Loaded, name: &str, key: Option<&str>) -> Response {
+    fn custom_style(&self, l: &Loaded, name: &str, base: &str, key: Option<&str>) -> Response {
         let name = name.strip_suffix(".json").unwrap_or(name);
         let Some(style) = self.custom.read(name) else {
             return Response::error(404, "no such style: styles.json lists them");
@@ -285,7 +302,7 @@ impl Server {
             return Response::error(503, "this bundle has no fonts or sprites: build it again");
         }
         self.stats.style("custom", name);
-        Response::new(200, "application/json", custom::compose(style, name, &self.urls(l, key))).with_header("Cache-Control", REVALIDATE)
+        Response::new(200, "application/json", custom::compose(style, name, &urls(l, base, key))).with_header("Cache-Control", REVALIDATE)
     }
 
     fn save(&self, name: &str, body: &[u8]) -> Response {
@@ -334,14 +351,8 @@ impl Server {
     }
 }
 
-/// The TileJSON of a bundle; with a key, its tiles carry it.
-fn keyed_tilejson(l: &Loaded, url: &str, key: Option<&str>) -> Vec<u8> {
-    if key.is_none() {
-        return l.tilejson.clone();
-    }
-    let mut tilejson: serde_json::Value = serde_json::from_slice(&l.tilejson).expect("the module wrote it");
-    tilejson["tiles"] = json!([Urls { url, version: &l.version, tile_type: &l.tile_type, key }.tiles()]);
-    serde_json::to_vec(&tilejson).expect("JSON values serialize")
+fn urls<'a>(l: &'a Loaded, url: &'a str, key: Option<&'a str>) -> Urls<'a> {
+    Urls { url, version: &l.version, tile_type: &l.tile_type, key }
 }
 
 /// A font or sprite, cached for good under the URL of the bundle in use, as the tiles are.
@@ -452,10 +463,10 @@ mod tests {
     use crate::assets;
     use crate::pmtiles::tests::archive;
     use geko_module_sdk::bundle::{BundleManifest, BundleModule};
-    use geko_module_sdk::module::{CONTRACT, ModuleName};
+    use geko_module_sdk::module::{ModuleName};
 
     fn view(root: &Path, version: &str, meta: &Meta) -> BundleView {
-        let module = BundleModule { name: ModuleName::new("tiles").unwrap(), version: "0".into(), contract: CONTRACT, meta: serde_json::to_value(meta).unwrap() };
+        let module = BundleModule { name: ModuleName::new("tiles").unwrap(), version: "0".into(), meta: serde_json::to_value(meta).unwrap() };
         let manifest = BundleManifest { format: 1, version: version.into(), created_unix: 0, modules: vec![module.clone()], licenses: vec![], artifacts: vec![] };
         BundleView { root: root.to_path_buf(), manifest, module }
     }
@@ -653,6 +664,28 @@ mod tests {
         assert_eq!(tiles(&[("api_key", "k1")]), "/tiles/{z}/{x}/{y}?v=b1&api_key=k1");
         assert_eq!(tiles(&[("api_key", "")]), "/tiles/{z}/{x}/{y}?v=b1");
         assert_eq!(tiles(&[]), "/tiles/{z}/{x}/{y}?v=b1");
+    }
+
+    #[test]
+    fn relative_urls_are_absolute_under_the_origin_of_the_request() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pmtiles = tmp.path().join("t.pmtiles");
+        fs::write(&pmtiles, archive(&[(tile_id(0, 0, 0), b"world")], 0)).unwrap();
+        let meta = tileset::convert(&pmtiles, &tmp.path().join("a/tiles"), &[BBox { west: 1.0, south: 38.5, east: 4.6, north: 40.2 }]).unwrap();
+        let ask = |server: &Server, route: &str, origin: Option<&str>| {
+            let r = server.handle(&Request { route: route.into(), origin: origin.map(str::to_owned), ..Default::default() });
+            serde_json::from_slice::<serde_json::Value>(&r.body).unwrap()
+        };
+        let server = Server::new("/tiles");
+        server.load(&view(&tmp.path().join("a"), "b1", &meta)).unwrap();
+        assert_eq!(ask(&server, "tilejson.json", Some("https://maps.example.com"))["tiles"][0], "https://maps.example.com/tiles/{z}/{x}/{y}?v=b1");
+        assert_eq!(ask(&server, "styles.json", Some("http://localhost:8080"))["style"], "http://localhost:8080/tiles/styles/{flavor}/{lang}.json");
+        // From a host that sends no origin, as before.
+        assert_eq!(ask(&server, "tilejson.json", None)["tiles"][0], "/tiles/{z}/{x}/{y}?v=b1");
+        // An absolute `url` is what the operator wants, whatever the request says.
+        let cdn = Server::new("https://cdn.example.com/tiles");
+        cdn.load(&view(&tmp.path().join("a"), "b1", &meta)).unwrap();
+        assert_eq!(ask(&cdn, "tilejson.json", Some("http://geko:8080"))["tiles"][0], "https://cdn.example.com/tiles/{z}/{x}/{y}?v=b1");
     }
 
     /// What the conformance suite of the SDK asks with no bundle loaded, asked of a loaded one: odd

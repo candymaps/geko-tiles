@@ -123,7 +123,7 @@ Estado tras cerrar lo que se podía desde aquí. Fuera, como dice «Objetivo»: 
 
 - **España con la imagen:** de principio a fin, Planetiler incluido, en 13 min 17 s («El servicio en frío»).
 - **Medida en frío:** una lectura de disco sí retrasa las demás peticiones, pero `pool: true` no compensa y se queda `pool: false`.
-- **Imágenes al cambiar el host:** `refresh-image`, un workflow diario en cada módulo, probado contra un registro local. Aún no ha corrido en GitHub.
+- **Sin imagen propia:** el modo operador usa la imagen única de geko, que lleva los módulos de su `modules.lock` (paso 3.4 del plan de actualización de módulos del host). Se quitaron `ci/image.Dockerfile`, `refresh-image.yml` y los pasos de imagen.
 - **Estilos propios** («Estilos propios»): rutas, validación, réplicas y el editor del panel (host, `ui/src/tiles/TilesPage.tsx`). El editor es un campo de texto con el JSON: sin vista previa del mapa.
 - **API keys** («API keys en las URLs») y **`geko tiles export`**.
 - **MLT de punta a punta:** build sobre los datos del golden y 496 de 496 teselas de muestra leídas por `@maplibre/mlt` 1.3.0, el decodificador de MapLibre GL JS. No se ha pintado en un navegador.
