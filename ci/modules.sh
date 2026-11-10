@@ -6,13 +6,6 @@
 #   ci/modules.sh build <folder>     compiles the module into <folder>/<module>/
 #   ci/modules.sh publish <folder>   signs the packages of <folder> and pushes them to
 #                                    $GEKO_MODULES_REGISTRY/geko-<module>
-#   ci/modules.sh image <folder>     makes the image of the operator mode from the package of
-#                                    <folder> (ci/image.Dockerfile, on $GEKO_HOST_IMAGE, by default
-#                                    the newest image of geko) and checks that it loads the module
-#   ci/modules.sh refresh-image      makes the image of `latest` again, from the package it carries,
-#                                    if there is a newer image of geko, and pushes it
-#   ci/modules.sh push-image <folder>  pushes that image to $GEKO_MODULES_REGISTRY/geko-<module>,
-#                                    with the tag <version> and, with GEKO_RELEASE=1, also latest
 #
 # The version of the module is that of Cargo.toml, followed by the commit (<version>-<commit>) unless
 # GEKO_RELEASE=1; it is compiled into the module (GEKO_MODULE_VERSION), which says it to the host
@@ -112,76 +105,8 @@ publish() {
     done
 }
 
-# The image shares its repository with the package, whose tags all end in the platform: geko asks
-# for those by name, so <version> and latest never reach it.
-host_image() { echo "${GEKO_HOST_IMAGE:-ghcr.io/candymaps/geko:latest}"; }
-host_digest() { docker image inspect --format '{{index .RepoDigests 0}}' "$1" | sed 's/.*@//'; }
-image_ref() {
-    local name
-    name=$(field name module/module.toml)
-    echo "$registry/geko-$name:$(field version "$1/$name/module.toml")"
-}
-
-image() {
-    local out=$1 ref name config host
-    ref=$(image_ref "$out")
-    name=$(field name module/module.toml)
-    host=$(host_image)
-    docker pull --quiet "$host" > /dev/null
-    docker build --file ci/image.Dockerfile --build-arg "HOST=$host" --build-arg "BASE=$(host_digest "$host")" \
-        --build-arg "VERSION=${ref##*:}" --build-arg "REVISION=${GEKO_IMAGE_REVISION:-$(git rev-parse --short HEAD)}" --tag "$ref" "$out"
-    # geko refuses a module of another contract or platform, here and not in the pods of a cluster.
-    # The image carries no configuration, and geko stops without one: an empty scope downloads nothing.
-    config=$(mktemp)
-    chmod 644 "$config"
-    docker run --rm -v "$config:/etc/geko/geko.toml:ro" "$ref" --modules "$name" plan \
-        || { rm -f "$config"; echo "$ref does not load its module" >&2; return 1; }
-    rm -f "$config"
-    echo "built $ref"
-}
-
-push_image() {
-    local ref
-    ref=$(image_ref "$1")
-    docker push "$ref"
-    if [ "${GEKO_RELEASE:-0}" = 1 ]; then
-        docker tag "$ref" "${ref%:*}:latest"
-        docker push "${ref%:*}:latest"
-    fi
-}
-
-# The image of `latest` again on the newest geko, from the package it carries: nothing is compiled.
-refresh_image() {
-    local name repo host label tmp id
-    name=$(field name module/module.toml)
-    repo=$registry/geko-$name
-    host=$(host_image)
-    if ! docker pull --quiet "$repo:latest" > /dev/null 2>&1; then
-        echo "$repo:latest does not exist yet: nothing to refresh"
-        return 0
-    fi
-    docker pull --quiet "$host" > /dev/null
-    label=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.base.digest"}}' "$repo:latest")
-    if [ "$label" = "$(host_digest "$host")" ]; then
-        echo "$repo:latest already has the newest geko"
-        return 0
-    fi
-    tmp=$(mktemp -d)
-    id=$(docker create "$repo:latest")
-    docker cp "$id:/usr/lib/geko/modules/$name" "$tmp/$name"
-    docker rm "$id" > /dev/null
-    GEKO_IMAGE_REVISION=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$repo:latest")
-    export GEKO_IMAGE_REVISION
-    image "$tmp" || { rm -rf "$tmp"; return 1; }
-    GEKO_RELEASE=1 push_image "$tmp"
-    rm -rf "$tmp"
-}
-
 case "${1:-}" in
     build) shift; build "${1:?usage: ci/modules.sh build <folder>}" ;;
     publish) shift; publish "${1:?usage: ci/modules.sh publish <folder>}" ;;
-    image) shift; image "${1:?usage: ci/modules.sh image <folder>}" ;;
-    push-image) shift; push_image "${1:?usage: ci/modules.sh push-image <folder>}" ;;
-    refresh-image) refresh_image ;;
-    *) echo "usage: ci/modules.sh build <folder> | publish <folder> | image <folder> | push-image <folder> | refresh-image" >&2; exit 2 ;;
+    *) echo "usage: ci/modules.sh build <folder> | publish <folder>" >&2; exit 2 ;;
 esac
