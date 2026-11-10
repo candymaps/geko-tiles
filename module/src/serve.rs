@@ -463,10 +463,10 @@ mod tests {
     use crate::assets;
     use crate::pmtiles::tests::archive;
     use geko_module_sdk::bundle::{BundleManifest, BundleModule};
-    use geko_module_sdk::module::{CONTRACT, ModuleName};
+    use geko_module_sdk::module::{ModuleName};
 
     fn view(root: &Path, version: &str, meta: &Meta) -> BundleView {
-        let module = BundleModule { name: ModuleName::new("tiles").unwrap(), version: "0".into(), contract: CONTRACT, meta: serde_json::to_value(meta).unwrap() };
+        let module = BundleModule { name: ModuleName::new("tiles").unwrap(), version: "0".into(), meta: serde_json::to_value(meta).unwrap() };
         let manifest = BundleManifest { format: 1, version: version.into(), created_unix: 0, modules: vec![module.clone()], licenses: vec![], artifacts: vec![] };
         BundleView { root: root.to_path_buf(), manifest, module }
     }
