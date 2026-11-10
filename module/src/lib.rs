@@ -25,7 +25,7 @@ mod tileset;
 use std::time::Duration;
 
 use geko_module_sdk::Result;
-use geko_module_sdk::module::{self, Built, BundleView, CommandInfo, Context, Description, Method, Module, ModuleName, Purge, Request, Response, Route};
+use geko_module_sdk::module::{Built, BundleView, CommandInfo, Context, Description, Method, Module, ModuleName, Purge, Request, Response, Route};
 
 use crate::pipeline::Setup;
 
@@ -70,7 +70,6 @@ impl Module for TilesModule {
         Description {
             name: ModuleName::new(NAME).expect("a valid name"),
             version: geko_module_sdk::module_version!().to_owned(),
-            contract: module::CONTRACT,
             routes: vec![
                 route("{z}/{x}/{y}"),
                 route("tilejson.json"),

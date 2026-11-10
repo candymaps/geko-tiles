@@ -10,7 +10,7 @@
 use std::time::Instant;
 
 use geko_module_sdk::bundle::{BundleManifest, BundleModule};
-use geko_module_sdk::module::{BundleView, CONTRACT, Context, DataPolicy, ModuleName, Request};
+use geko_module_sdk::module::{BundleView, Context, DataPolicy, ModuleName, Request};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -96,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn geko_tiles(meta: &serde_json::Value, root: &str) -> Result<(Box<dyn geko_module_sdk::module::Module>, u128), Box<dyn std::error::Error>> {
     let data = tempfile_dir();
     let module = geko_module_tiles::open(Context { config: String::new(), config_file: String::new(), scope: Default::default(), data_dir: data, data: DataPolicy::default() })?;
-    let entry = BundleModule { name: ModuleName::new("tiles")?, version: "0".into(), contract: CONTRACT, meta: meta.clone() };
+    let entry = BundleModule { name: ModuleName::new("tiles")?, version: "0".into(), meta: meta.clone() };
     let manifest = BundleManifest { format: 1, version: "bench".into(), created_unix: 0, modules: vec![entry.clone()], licenses: vec![], artifacts: vec![] };
     let started = Instant::now();
     module.load(&BundleView { root: root.into(), manifest, module: entry })?;

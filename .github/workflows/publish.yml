@@ -18,7 +18,7 @@ env:
 jobs:
   # Publishes in ghcr.io, with the version of Cargo.toml:
   # - if the push changed what goes into it (not only documentation), the module
-  #   (ghcr.io/candymaps/geko-tiles, tags <version>-<commit>-<platform> and contract-<n>-<platform>,
+  #   (ghcr.io/candymaps/geko-tiles, tags <version>-<commit>-<platform>,
   #   signed: ci/modules.sh), which geko downloads;
   # - when that version has no GitHub release yet (it was raised in Cargo.toml), also the tag
   #   <version>-<platform> on the module, and the git tag
