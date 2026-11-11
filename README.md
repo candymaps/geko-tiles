@@ -95,6 +95,6 @@ Read the full terms in [LICENSE](LICENSE).
 | Technology | What it is used for |
 |---|---|
 | **Rust** (2024 edition) | The module: its build stages and the service of the tiles |
-| `geko-module-sdk` | The contract with the host, at the tag `sdk-<contract>` of [geko](https://github.com/candymaps/geko) |
+| `geko-module-sdk` | The contract with the host, at the tag `sdk-v<version>` of [geko](https://github.com/candymaps/geko) |
 | [Planetiler](https://github.com/onthegomap/planetiler) (Java) | Generating the tiles, as a subprocess of the build |
 | [Protomaps Basemap](https://github.com/protomaps/basemaps) | The Planetiler profile (what goes into each layer of the tiles) and the styles that paint them |
